@@ -1,0 +1,100 @@
+name: tests
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit:
+    name: unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Unit tests
+        run: pytest tests -v --tb=short --ignore=tests/stress
+
+      - name: Stress tests
+        # Allowed to take longer; still run on PR / push.
+        run: pytest tests/stress -v --tb=short -p no:cacheprovider
+        timeout-minutes: 5
+
+  postgres-contract:
+    name: store contract — Postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_URL: postgresql+psycopg2://test:test@localhost:5432/test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps + psycopg2
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt psycopg2-binary
+
+      - name: Apply migration
+        run: psql "postgresql://test:test@localhost:5432/test" -f migrations/001_sms_inbox_raw.sql
+
+      - name: Postgres contract tests
+        run: pytest tests/test_sms_inbox_store_contract.py -v --tb=short
+
+  docker-build:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t apteker-router-l1:ci .
+      - name: Smoke test — container starts and answers /healthz
+        run: |
+          docker run -d --name app -p 8000:8000 \
+            -e SMS_BEARER_TOKEN_PRIMARY=ci-test \
+            -e ADMIN_BEARER_TOKEN=ci-admin \
+            apteker-router-l1:ci
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS http://localhost:8000/healthz > /dev/null 2>&1; then
+              echo "container is healthy on attempt $i"
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://localhost:8000/healthz
+          # Confirm bearer enforcement on the actual endpoint.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/webhooks/sms_phone -H 'content-type: application/json' -d '{}')" = "401"
+          docker logs app

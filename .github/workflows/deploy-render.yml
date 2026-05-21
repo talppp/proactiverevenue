@@ -1,0 +1,39 @@
+name: deploy (Render)
+
+# Triggers a Render deploy via its deploy hook after CI is green on the
+# tracked branch. The hook URL is a secret you create on Render:
+#   Render dashboard → service → Settings → Deploy Hook → Copy URL
+#   Then in this repo: Settings → Secrets and variables → Actions →
+#   New repository secret → name: RENDER_DEPLOY_HOOK_URL, value: <URL>
+#
+# If the secret is unset, the job is a no-op (skipped via the if-check).
+
+on:
+  workflow_run:
+    workflows: ["tests"]
+    types: [completed]
+    branches:
+      - main
+      - claude/open-nathalie-project-IT0ZA
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Skip if no hook configured
+        id: gate
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL not set — skipping deploy"
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger Render deploy
+        if: steps.gate.outputs.deploy == 'true'
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"

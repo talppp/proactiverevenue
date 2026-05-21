@@ -1,26 +1,68 @@
-# Render Blueprint - infra-as-code for the AI Issue Router service.
+# Render Blueprint — free-tier deploy for the L1 SMS-phone service.
 # Apply with: render blueprint apply --file render.yaml
-# Adjust DATABASE plan to "starter" ($7/mo) once the demo period ends.
+#
+# Two services declared here:
+#   - apteker-router        (full pipeline; uses app.main:app — needs L2-L6
+#                            modules from the Drive project to be present)
+#   - apteker-router-l1     (standalone L1; uses app.main_l1:app — runs as
+#                            soon as you wire it to GitHub, no L2-L6 needed)
+#
+# Pick ONE for first deploy. Recommended: apteker-router-l1 on the FREE
+# plan to validate Nathalie's phone forwarder against a real public URL,
+# then graduate to the full apteker-router service once L2 is wired.
 
 services:
+  # ---------- L1-only deployable (recommended for first deploy) ----------
+  - type: web
+    name: apteker-router-l1
+    runtime: docker
+    plan: free                # 750 free-tier hours/month, cold-starts after 15m idle
+    region: oregon
+    autoDeploy: true
+    branch: claude/open-nathalie-project-IT0ZA
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: DB_URL
+        value: memory         # swap for free Neon/Supabase Postgres for persistence
+      - key: SMS_BEARER_TOKEN_PRIMARY
+        sync: false           # set in Render dashboard, never commit
+      - key: SMS_BEARER_TOKEN_SECONDARY
+        sync: false           # optional, for zero-downtime rotation
+      - key: ADMIN_BEARER_TOKEN
+        sync: false
+      - key: SMS_POLL_INTERVAL_SECONDS
+        value: "30"
+      - key: SMS_STUCK_THRESHOLD_SECONDS
+        value: "30"
+      - key: SMS_POLL_MAX_ATTEMPTS
+        value: "5"
+      - key: LOG_LEVEL
+        value: INFO
+
+  # ---------- Full pipeline (deploy after L2-L6 modules are in this repo) ----------
   - type: web
     name: apteker-router
     runtime: python
-    plan: starter            # $7/mo; bump to standard if traffic warrants
+    plan: starter             # $7/mo; full pipeline needs persistent disk + cron
     region: oregon
-    autoDeploy: true
+    autoDeploy: false         # off until L2-L6 are present
     branch: main
-    buildCommand: "pip install -e ."
+    buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /healthz
     envVars:
       - key: DB_URL
-        fromDatabase:
-          name: apteker-router-db
-          property: connectionString
+        sync: false           # set to a Postgres URL (Neon free / Supabase free / Render starter)
       - key: ANTHROPIC_API_KEY
-        sync: false           # set via Render dashboard, never in source
+        sync: false
       - key: SENTRY_DSN
+        sync: false
+      - key: SMS_BEARER_TOKEN_PRIMARY
+        sync: false
+      - key: SMS_BEARER_TOKEN_SECONDARY
+        sync: false
+      - key: ADMIN_BEARER_TOKEN
         sync: false
       - key: LOG_LEVEL
         value: INFO
@@ -31,31 +73,20 @@ services:
       - key: PYTHON_VERSION
         value: "3.11.9"
 
-  # Cron worker for P0 escalation timers.
-  # Runs every minute - sweeps unacknowledged P0s and fires +5 min push /
-  # +10 min voice call per the routing rules YAML.
+  # Cron worker for P0 escalation timers (full pipeline only).
   - type: cron
     name: apteker-router-p0-escalate
     runtime: python
     plan: starter
     region: oregon
     branch: main
-    schedule: "* * * * *"            # every minute
-    buildCommand: "pip install -e ."
+    schedule: "* * * * *"
+    buildCommand: "pip install -r requirements.txt"
     startCommand: "python -m app.jobs.p0_escalate --once"
     envVars:
       - key: DB_URL
-        fromDatabase:
-          name: apteker-router-db
-          property: connectionString
+        sync: false
       - key: SENTRY_DSN
         sync: false
       - key: PYTHON_VERSION
         value: "3.11.9"
-
-databases:
-  - name: apteker-router-db
-    plan: free                # 1 GB; bump to starter ($7/mo) for daily backups
-    databaseName: apteker
-    user: apteker
-    region: oregon

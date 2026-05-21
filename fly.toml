@@ -1,0 +1,44 @@
+# Fly.io alternative deploy config.
+# Usage:
+#   brew install flyctl
+#   fly auth login
+#   fly launch --copy-config --name apteker-router-l1 --region iad --no-deploy
+#   fly secrets set SMS_BEARER_TOKEN_PRIMARY=... ADMIN_BEARER_TOKEN=...
+#   fly deploy
+#
+# Free tier (as of 2026): 3 shared-cpu-1x 256MB VMs always-on. No idle
+# cold-starts, unlike Render free. For Postgres, attach Fly Postgres
+# (free tier) or use external Neon/Supabase free.
+
+app = "apteker-router-l1"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  DB_URL = "memory"
+  SMS_POLL_INTERVAL_SECONDS = "30"
+  SMS_STUCK_THRESHOLD_SECONDS = "30"
+  SMS_POLL_MAX_ATTEMPTS = "5"
+  LOG_LEVEL = "INFO"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0   # set to 1 if you can't tolerate cold start
+
+  [http_service.checks]
+    [http_service.checks.health]
+      grace_period = "10s"
+      interval = "30s"
+      method = "GET"
+      timeout = "5s"
+      path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
