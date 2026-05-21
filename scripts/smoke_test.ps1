@@ -91,6 +91,14 @@ Write-Host "  Started: $(Get-Date -Format o)"
 Write-Host "================================================================"
 Write-Host
 
+# Per-run identifier so each invocation produces fresh msg_ids; otherwise
+# the in-memory staging store on the server makes test 4 / test 9 fail
+# with "duplicate=true" on the second run.
+$runId    = [Guid]::NewGuid().ToString("N").Substring(0, 8)
+$runStamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss") + "+00:00"
+Write-Host "Run ID: $runId    Run timestamp: $runStamp"
+Write-Host
+
 # ----- 1. healthz ----------------------------------------------------------
 Write-Host "[1/9] GET /healthz (public)"
 $r = Invoke-Api -Path "/healthz"
@@ -118,8 +126,8 @@ Write-Host
 Write-Host "[4/9] POST /webhooks/sms_phone (happy path)"
 $payload = @{
     from_number       = "+14045551234"
-    body              = "render smoke test from script"
-    received_at_phone = "2026-05-21T15:30:00+00:00"
+    body              = "render smoke test run=$runId"
+    received_at_phone = $runStamp
 } | ConvertTo-Json -Compress
 $r = Invoke-Api -Method POST -Path "/webhooks/sms_phone" `
     -Headers @{ Authorization = "Bearer $SmsToken" } -Body $payload
@@ -167,8 +175,8 @@ Write-Host
 Write-Host "[9/9] POST /admin/sms_inbox_raw/inject (manual backfill)"
 $injectBody = @{
     from_number       = "+14045559999"
-    body              = "admin backfill smoke test"
-    received_at_phone = "2026-05-21T15:35:00+00:00"
+    body              = "admin backfill run=$runId"
+    received_at_phone = $runStamp
 } | ConvertTo-Json -Compress
 $r = Invoke-Api -Method POST -Path "/admin/sms_inbox_raw/inject" `
     -Headers @{ Authorization = "Bearer $AdminToken" } -Body $injectBody

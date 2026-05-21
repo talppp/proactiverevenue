@@ -34,6 +34,13 @@ echo "  Target: $URL"
 echo "  Started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "================================================================"
 
+# Per-run identifier so each invocation produces fresh msg_ids; otherwise
+# the in-memory staging store on the server makes test 4 / test 9 fail
+# with "duplicate=true" on the second run.
+RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
+RUN_STAMP=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
+echo "Run ID: $RUN_ID    Run timestamp: $RUN_STAMP"
+
 echo
 echo "[1/9] GET /healthz (public)"
 body=$(curl -sS "$URL/healthz")
@@ -57,7 +64,7 @@ echo "  status=$status"
 
 echo
 echo "[4/9] POST /webhooks/sms_phone (happy path)"
-payload='{"from_number":"+14045551234","body":"render smoke test from script","received_at_phone":"2026-05-21T15:30:00+00:00"}'
+payload='{"from_number":"+14045551234","body":"render smoke test run='"$RUN_ID"'","received_at_phone":"'"$RUN_STAMP"'"}'
 body=$(curl -sS -X POST "$URL/webhooks/sms_phone" \
     -H "Authorization: Bearer $SMS_TOKEN" \
     -H "Content-Type: application/json" \
@@ -104,7 +111,7 @@ handed_off=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.std
 
 echo
 echo "[9/9] POST /admin/sms_inbox_raw/inject (manual backfill)"
-inject_body='{"from_number":"+14045559999","body":"admin backfill smoke test","received_at_phone":"2026-05-21T15:35:00+00:00"}'
+inject_body='{"from_number":"+14045559999","body":"admin backfill run='"$RUN_ID"'","received_at_phone":"'"$RUN_STAMP"'"}'
 body=$(curl -sS -X POST "$URL/admin/sms_inbox_raw/inject" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
     -H "Content-Type: application/json" \
