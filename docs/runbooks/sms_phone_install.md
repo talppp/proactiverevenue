@@ -65,32 +65,114 @@ Never commit tokens to git.
 
 ## 2. iOS Shortcut
 
-Build once in the Shortcuts app on Tal's iPhone (it's easier to author there
-than on Nathalie's), AirDrop the signed shortcut to Nathalie, walk her through
-the install on a screen-share.
+Build once on Tal's iPhone (it's easier to author there than on Nathalie's),
+share via iCloud link to Nathalie, walk her through the install on a
+screen-share. Requires iOS 15 or later.
 
-### Automation
-1. Shortcuts → Automations → New → Personal Automation → **Message** trigger
-2. Sender: **Any**; Run Immediately: **ON**
-3. Add action: **Get Contents of URL**
-   - URL: `https://router.apteker.proactiverev.com/webhooks/sms_phone`
-   - Method: **POST**
-   - Headers:
-     - `Authorization: Bearer <SMS_BEARER_TOKEN_PRIMARY>`
-     - `Content-Type: application/json`
-   - Request Body: **JSON**
-     ```json
-     {
-       "from_number":       "<Magic Variable: Sender>",
-       "body":              "<Magic Variable: Message>",
-       "received_at_phone": "<Magic Variable: Current Date (formatted ISO 8601)>"
-     }
-     ```
+### 2.1 Step-by-step build
 
-### Verification before handing back to Nathalie
-- From any other phone, text Nathalie's line: "test from runbook step 2.4".
-- `curl -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
-  https://.../admin/sms_inbox_raw/health` should show `handed_off >= 1`.
+Open the **Shortcuts** app → **Automation** tab (bottom) → **+** (top right)
+→ **Create Personal Automation**.
+
+**Trigger**
+1. Scroll down, tap **Message**.
+2. Sender: leave as **Any** (specific senders can be added later).
+3. **Run Immediately**: toggle **ON** (no confirmation tap on each fire;
+   iOS 15+ behavior).
+4. Tap **Next**.
+
+**Actions** — add these in order using the **+ Add Action** button.
+
+**Action 1 — Date**
+- Search "Date" → tap **Date**.
+- Leave as **Current Date**.
+- Output variable name (rename for clarity): **Now**.
+
+**Action 2 — Format Date**
+- Search "Format Date" → tap **Format Date**.
+- Date: tap and pick the **Now** magic variable from Action 1.
+- Date Format: tap and choose **Custom**.
+- Format String: paste exactly:
+  ```
+  yyyy-MM-dd'T'HH:mm:ssXXX
+  ```
+- Output variable name: **NowISO**.
+
+**Action 3 — Dictionary**
+- Search "Dictionary" → tap **Dictionary**.
+- Tap **+ Add new item** three times. Set each to **Text** type and:
+  - Key `from_number`, Value: pick **Magic Variable** → **Sender**
+    (from the Message trigger).
+  - Key `body`, Value: pick **Magic Variable** → **Message** (from the
+    Message trigger).
+  - Key `received_at_phone`, Value: pick **Magic Variable** → **NowISO**
+    (Action 2).
+- Output variable name: **Payload**.
+
+**Action 4 — Get Contents of URL**
+- Search "Get Contents of URL" → tap **Get Contents of URL**.
+- URL field: paste exactly:
+  ```
+  https://router.apteker.proactiverev.com/webhooks/sms_phone
+  ```
+- Tap the expand arrow (▼) to reveal the rest of the action.
+- **Method**: tap and change to **POST**.
+- **Headers**: tap **Add new header** twice.
+  - Key `Authorization`, Text: `Bearer <PASTE PRIMARY TOKEN HERE>`
+  - Key `Content-Type`, Text: `application/json`
+- **Request Body**: tap and change to **JSON**.
+  - Then tap the body field and pick **Magic Variable** → **Payload**
+    (Action 3).
+- Output variable name: **Response** (we won't use it but it makes
+  debugging easier).
+
+**Save**
+1. Tap **Next**.
+2. Review the summary; tap **Done**.
+
+The automation now appears in the **Automation** tab.
+
+### 2.2 Self-test on Tal's phone first
+
+1. From a separate device, send Tal's phone a test SMS:
+   > test from runbook 2.2
+2. Top of the screen: a notification "Running your automation…" appears
+   briefly.
+3. From a laptop:
+   ```bash
+   curl -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+        https://router.apteker.proactiverev.com/admin/sms_inbox_raw/health
+   ```
+   `handed_off` should be `>= 1`.
+4. If it didn't fire: open Shortcuts → Automation → tap the automation,
+   confirm **Run Immediately** is on. iOS sometimes resets this on first
+   creation; just toggle it again.
+
+### 2.3 Hand-off to Nathalie
+
+1. In Shortcuts on Tal's phone, long-press the automation → **Share**.
+2. Choose **iCloud Link** → copy the link.
+3. Send it to Nathalie via the same Apple Account email (the link only
+   works in Apple's ecosystem).
+4. **Before she installs**, edit the shared Shortcut so the `Authorization`
+   header uses **her** copy of the primary bearer token. (You can ship
+   one Shortcut with a placeholder and have her paste the token once
+   during install; whichever is easier on the screen-share.)
+5. On the screen-share: tap her iCloud link → **Add Shortcut** → tap
+   her installed automation → walk her through the **Run Immediately**
+   toggle and confirm it's on.
+6. Run the same self-test as 2.2 but targeting her phone.
+
+### 2.4 Known iOS quirks to coach Nathalie through
+
+- **Notification banner on every run.** iOS shows a banner "Running your
+  automation". She can hide banners for Shortcuts in **Settings →
+  Notifications → Shortcuts**; the automation still runs.
+- **Low Power Mode.** Sustained Low Power can defer the automation by
+  several minutes. The dashboard L1 panel will show a gap; we'll know.
+- **Focus modes.** Driving / Sleep / Do Not Disturb Focus modes do **not**
+  block the automation by default, but custom Focus profiles can.
+  Verify on her primary Focus before declaring done.
 
 ## 3. Zero-downtime token rotation
 

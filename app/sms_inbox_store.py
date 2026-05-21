@@ -180,34 +180,191 @@ class InMemorySmsInboxStore:
 
 
 # ----------------------------------------------------------------------
-# Postgres impl sketch (real project, uses SQLAlchemy like app/store.py):
-#
-#     INSERT INTO sms_inbox_raw (msg_id, from_number, to_number, body,
-#                                received_at_phone)
-#     VALUES (:msg_id, :from_n, :to_n, :body, :rcvd_phone)
-#     ON CONFLICT (msg_id) DO NOTHING
-#     RETURNING msg_id
-#     -- was_new = rowcount == 1
-#
-#     SELECT msg_id, from_number, to_number, body, received_at_phone,
-#            received_at, status, attempts, last_error, handed_off_at
-#       FROM sms_inbox_raw
-#      WHERE status = 'new'
-#        AND received_at < now() - make_interval(secs => :threshold)
-#      ORDER BY received_at
-#      LIMIT :batch
-#      FOR UPDATE SKIP LOCKED;
-#
-#     UPDATE sms_inbox_raw
-#        SET status = 'handed_off', handed_off_at = now(),
-#            last_error = NULL
-#      WHERE msg_id = :id;
-#
-#     UPDATE sms_inbox_raw
-#        SET attempts = attempts + 1,
-#            last_error = :err,
-#            status = CASE WHEN attempts + 1 >= :max THEN 'dead_letter'
-#                          ELSE status END
-#      WHERE msg_id = :id
-#      RETURNING status;
-# ----------------------------------------------------------------------
+class PostgresSmsInboxStore:
+    """Postgres-backed implementation. Matches the InMemory contract.
+
+    The recovery loop runs single-instance (max_instances=1 + coalesce=True
+    in the APScheduler config), so `fetch_stuck` does not need explicit
+    row locking — the next tick won't fire until the current one finishes.
+    If we ever scale to multiple poller instances, change the SELECT to
+    use `FOR UPDATE SKIP LOCKED` inside a short transaction and stamp
+    rows to an intermediate 'in_progress' status before handing off.
+    """
+
+    def __init__(self, db_url: str) -> None:
+        # Local import keeps the dependency optional for the in-memory path.
+        from sqlalchemy import create_engine
+
+        self.engine = create_engine(db_url, future=True)
+
+    def insert_new(
+        self,
+        from_number: str,
+        to_number: str | None,
+        body: str,
+        received_at_phone: datetime,
+    ) -> tuple[SmsRow, bool]:
+        from sqlalchemy import text
+
+        msg_id = compute_msg_id(from_number, body, received_at_phone)
+        with self.engine.begin() as conn:
+            inserted = conn.execute(
+                text(
+                    """
+                    INSERT INTO sms_inbox_raw
+                      (msg_id, from_number, to_number, body, received_at_phone)
+                    VALUES (:msg_id, :from_n, :to_n, :body, :rcvd)
+                    ON CONFLICT (msg_id) DO NOTHING
+                    RETURNING msg_id
+                    """
+                ),
+                {
+                    "msg_id": msg_id,
+                    "from_n": from_number,
+                    "to_n": to_number,
+                    "body": body,
+                    "rcvd": received_at_phone,
+                },
+            ).fetchone()
+            was_new = inserted is not None
+            row = self._fetch(conn, msg_id)
+        assert row is not None  # we just inserted or hit an existing row
+        return row, was_new
+
+    def mark_handed_off(self, msg_id: str) -> None:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE sms_inbox_raw
+                       SET status='handed_off',
+                           handed_off_at=now(),
+                           last_error=NULL
+                     WHERE msg_id=:id
+                    """
+                ),
+                {"id": msg_id},
+            )
+
+    def mark_attempt_failed(
+        self, msg_id: str, error: str, max_attempts: int
+    ) -> Status:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            new_status = conn.execute(
+                text(
+                    """
+                    UPDATE sms_inbox_raw
+                       SET attempts = attempts + 1,
+                           last_error = :err,
+                           status = CASE
+                               WHEN attempts + 1 >= :maxn THEN 'dead_letter'
+                               ELSE status
+                           END
+                     WHERE msg_id = :id
+                    RETURNING status
+                    """
+                ),
+                {"id": msg_id, "err": error[:500], "maxn": max_attempts},
+            ).scalar_one_or_none()
+        return new_status or "new"
+
+    def fetch_stuck(self, threshold_seconds: int, batch_size: int) -> list[SmsRow]:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT msg_id, from_number, to_number, body,
+                           received_at_phone, received_at, status, attempts,
+                           last_error, handed_off_at
+                      FROM sms_inbox_raw
+                     WHERE status='new'
+                       AND received_at < now() - make_interval(secs => :thr)
+                  ORDER BY received_at
+                     LIMIT :batch
+                    """
+                ),
+                {"thr": threshold_seconds, "batch": batch_size},
+            ).fetchall()
+        return [self._row_from_db(r) for r in rows]
+
+    def fetch(self, msg_id: str) -> SmsRow | None:
+        with self.engine.begin() as conn:
+            return self._fetch(conn, msg_id)
+
+    def reset_for_replay(self, msg_id: str) -> bool:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    UPDATE sms_inbox_raw
+                       SET status='new', attempts=0, last_error=NULL,
+                           handed_off_at=NULL
+                     WHERE msg_id=:id AND status='dead_letter'
+                    RETURNING msg_id
+                    """
+                ),
+                {"id": msg_id},
+            ).fetchone()
+        return row is not None
+
+    def counts_by_status(self) -> dict[Status, int]:
+        from sqlalchemy import text
+
+        counts = {"new": 0, "handed_off": 0, "dead_letter": 0}
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT status, count(*) FROM sms_inbox_raw GROUP BY status"
+                )
+            ).fetchall()
+        for status, n in rows:
+            counts[status] = int(n)
+        return counts
+
+    # ------------------------------------------------------------------
+    def _fetch(self, conn, msg_id: str) -> SmsRow | None:
+        from sqlalchemy import text
+
+        row = conn.execute(
+            text(
+                """
+                SELECT msg_id, from_number, to_number, body,
+                       received_at_phone, received_at, status, attempts,
+                       last_error, handed_off_at
+                  FROM sms_inbox_raw
+                 WHERE msg_id=:id
+                """
+            ),
+            {"id": msg_id},
+        ).fetchone()
+        return self._row_from_db(row) if row else None
+
+    @staticmethod
+    def _row_from_db(r) -> SmsRow:
+        return SmsRow(
+            msg_id=r[0],
+            from_number=r[1],
+            to_number=r[2],
+            body=r[3],
+            received_at_phone=r[4],
+            received_at=r[5],
+            status=r[6],
+            attempts=r[7],
+            last_error=r[8],
+            handed_off_at=r[9],
+        )
+
+
+def make_sms_inbox_store(db_url: str):
+    """Factory matching the style of app.store.make_store()."""
+    if not db_url or db_url == "memory":
+        return InMemorySmsInboxStore()
+    return PostgresSmsInboxStore(db_url)

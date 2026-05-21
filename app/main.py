@@ -21,15 +21,33 @@ from fastapi.responses import HTMLResponse
 
 from app.config import DB_URL, PROJECT_ROOT
 from app.ingestion.inbound import router as inbound_router
+from app.ingestion.sms_phone import router as sms_phone_router
+from app.admin import router as admin_router
 from app.jobs.p0_escalate import loop as p0_escalate_loop
+from app.jobs.sms_poll import drain_stuck as sms_drain_stuck
 from app.logging_setup import get_logger
 from app.pipeline import Pipeline
 from app.router.rules import rules
+from app.sms_inbox_store import InMemorySmsInboxStore
 from app.store import make_store
 from app.ws import HUB
 from scripts.seed_database import seed_inmemory_store, seed_postgres_store  # noqa: E402
 
 log = get_logger("app")
+
+
+async def _sms_poll_loop(app: FastAPI, interval: float) -> None:
+    """Periodically drain stuck rows from sms_inbox_raw."""
+    while True:
+        try:
+            await sms_drain_stuck(
+                app.state.sms_inbox_store, app.state.pipeline
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # pragma: no cover - logged for ops visibility
+            log.exception("sms_poll_iteration_failed", error=str(e))
+        await asyncio.sleep(interval)
 
 # ---------------------------------------------------------------------------
 # Sentry - exception capture in prod.  Free tier (5K events/mo) is plenty.
@@ -73,25 +91,41 @@ async def lifespan(app: FastAPI):
     app.state.store = store
     app.state.pipeline = Pipeline(store)
 
+    # L1 SMS-phone staging store. In prod swap for PostgresSmsInboxStore
+    # once the migration in migrations/001_sms_inbox_raw.sql is applied.
+    app.state.sms_inbox_store = InMemorySmsInboxStore()
+
     # Background P0 escalation sweep (in-process, every 60s).
     # In prod on Render the same module is run as a separate cron job;
     # here we run it embedded so the demo Just Works.
     escalation_task = asyncio.create_task(p0_escalate_loop(store, interval=60.0))
     app.state.escalation_task = escalation_task
 
+    # SMS-phone recovery loop. Healthy traffic is handed off in-process by
+    # the webhook; this loop only drains rows that didn't make it through.
+    from app import config as _cfg
+    sms_poll_task = asyncio.create_task(
+        _sms_poll_loop(app, interval=float(_cfg.SMS_POLL_INTERVAL_SECONDS))
+    )
+    app.state.sms_poll_task = sms_poll_task
+
     log.info("app_startup", db_url=DB_URL[:30], rules_version=1,
-             escalation_loop="on", sentry=bool(_SENTRY_DSN))
+             escalation_loop="on", sms_poll="on", sentry=bool(_SENTRY_DSN))
     yield
     escalation_task.cancel()
-    try:
-        await escalation_task
-    except (asyncio.CancelledError, Exception):
-        pass
+    sms_poll_task.cancel()
+    for task in (escalation_task, sms_poll_task):
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
     log.info("app_shutdown")
 
 
 app = FastAPI(title="Apteker AI Issue Router", version="0.1.0", lifespan=lifespan)
 app.include_router(inbound_router)
+app.include_router(sms_phone_router)
+app.include_router(admin_router)
 
 
 @app.exception_handler(Exception)
