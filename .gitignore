@@ -1,0 +1,21 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Generated deliverables (re-runnable from build_*.py)
+*.docx
+*.pdf
+01_Diagrams/*.png
+02_Workflow_Designs/*.docx
+03_Discovery/*.docx
+04_Rules_and_Routing/*.docx
+05_Workflow_Mapping/*.docx
+06_Taxonomy/*.docx
+08_Review_Schema_Plan/*.docx
+08_Review_Schema_Plan/02_ER_diagram.png
