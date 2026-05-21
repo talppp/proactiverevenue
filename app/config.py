@@ -33,6 +33,17 @@ SCHEMA_SQL_PATH    = PROJECT_ROOT / "08_Review_Schema_Plan" / "02_schema.sql"
 
 CONFIDENCE_FLOOR: float = float(os.environ.get("CONFIDENCE_FLOOR", "0.55"))
 
+# --- L1 SMS-phone ingestion -------------------------------------------
+# Receives every inbound SMS from Nathalie's iPhone via the iOS Shortcuts
+# webhook (POST /webhooks/sms_phone). Staging table: sms_inbox_raw.
+SMS_POLL_INTERVAL_SECONDS:   int = int(os.environ.get("SMS_POLL_INTERVAL_SECONDS", "30"))
+SMS_POLL_BATCH_SIZE:         int = int(os.environ.get("SMS_POLL_BATCH_SIZE", "50"))
+SMS_POLL_MAX_ATTEMPTS:       int = int(os.environ.get("SMS_POLL_MAX_ATTEMPTS", "5"))
+SMS_STUCK_THRESHOLD_SECONDS: int = int(os.environ.get("SMS_STUCK_THRESHOLD_SECONDS", "30"))
+SMS_BEARER_TOKEN_PRIMARY:   str | None = os.environ.get("SMS_BEARER_TOKEN_PRIMARY")
+SMS_BEARER_TOKEN_SECONDARY: str | None = os.environ.get("SMS_BEARER_TOKEN_SECONDARY")
+ADMIN_BEARER_TOKEN:         str | None = os.environ.get("ADMIN_BEARER_TOKEN")
+
 # --- Org / team seeding (CI + demo) -----------------------------------
 ORG_NAME = "Apteker Realty"
 ORG_TIMEZONE = "America/New_York"
