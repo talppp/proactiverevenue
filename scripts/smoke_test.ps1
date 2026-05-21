@@ -10,8 +10,8 @@
 
 param(
     [string]$Url        = "https://apteker-router-l1.onrender.com",
-    [string]$SmsToken   = "TaYpMgFK3guXy2dU6nkRbpjy_j1IH5s1briRlUuwXLg",
-    [string]$AdminToken = "TYFesbM02AO0Ya-r2ql0M2VKcHWtMpyk6YhuAUhyKs4"
+    [string]$SmsToken   = "7PMZYhYBDlDv9di3zz-kTGo13pujzjPfTFOYTmaWavA",
+    [string]$AdminToken = "Mck70UYWLCd_iOkOnGele1TzmkhpjxfIIm6bcPCqxQ4"
 )
 
 $ErrorActionPreference = "Stop"
