@@ -1,18 +1,12 @@
-# Render Blueprint — free-tier deploy for the L1 SMS-phone service.
-# Apply with: render blueprint apply --file render.yaml
+# Render Blueprint — free-tier L1-only deploy.
+# Apply via Render dashboard → New + → Blueprint → pick this repo.
 #
-# Two services declared here:
-#   - apteker-router        (full pipeline; uses app.main:app — needs L2-L6
-#                            modules from the Drive project to be present)
-#   - apteker-router-l1     (standalone L1; uses app.main_l1:app — runs as
-#                            soon as you wire it to GitHub, no L2-L6 needed)
-#
-# Pick ONE for first deploy. Recommended: apteker-router-l1 on the FREE
-# plan to validate Nathalie's phone forwarder against a real public URL,
-# then graduate to the full apteker-router service once L2 is wired.
+# This file declares ONLY the L1 SMS-phone service so the Blueprint
+# apply flow asks for just one set of env vars. The full-pipeline
+# service and P0 cron are kept commented out at the bottom — uncomment
+# them once the L2-L6 modules from the Drive project are in this repo.
 
 services:
-  # ---------- L1-only deployable (recommended for first deploy) ----------
   - type: web
     name: apteker-router-l1
     runtime: docker
@@ -26,9 +20,9 @@ services:
       - key: DB_URL
         value: memory         # swap for free Neon/Supabase Postgres for persistence
       - key: SMS_BEARER_TOKEN_PRIMARY
-        sync: false           # set in Render dashboard, never commit
+        sync: false           # set in Render dashboard during Blueprint apply
       - key: SMS_BEARER_TOKEN_SECONDARY
-        sync: false           # optional, for zero-downtime rotation
+        sync: false           # optional; leave blank until first token rotation
       - key: ADMIN_BEARER_TOKEN
         sync: false
       - key: SMS_POLL_INTERVAL_SECONDS
@@ -40,53 +34,58 @@ services:
       - key: LOG_LEVEL
         value: INFO
 
-  # ---------- Full pipeline (deploy after L2-L6 modules are in this repo) ----------
-  - type: web
-    name: apteker-router
-    runtime: python
-    plan: starter             # $7/mo; full pipeline needs persistent disk + cron
-    region: oregon
-    autoDeploy: false         # off until L2-L6 are present
-    branch: main
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
-    healthCheckPath: /healthz
-    envVars:
-      - key: DB_URL
-        sync: false           # set to a Postgres URL (Neon free / Supabase free / Render starter)
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: SENTRY_DSN
-        sync: false
-      - key: SMS_BEARER_TOKEN_PRIMARY
-        sync: false
-      - key: SMS_BEARER_TOKEN_SECONDARY
-        sync: false
-      - key: ADMIN_BEARER_TOKEN
-        sync: false
-      - key: LOG_LEVEL
-        value: INFO
-      - key: CONFIDENCE_FLOOR
-        value: "0.55"
-      - key: LLM_DAILY_USD_CEILING
-        value: "10.0"
-      - key: PYTHON_VERSION
-        value: "3.11.9"
-
-  # Cron worker for P0 escalation timers (full pipeline only).
-  - type: cron
-    name: apteker-router-p0-escalate
-    runtime: python
-    plan: starter
-    region: oregon
-    branch: main
-    schedule: "* * * * *"
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python -m app.jobs.p0_escalate --once"
-    envVars:
-      - key: DB_URL
-        sync: false
-      - key: SENTRY_DSN
-        sync: false
-      - key: PYTHON_VERSION
-        value: "3.11.9"
+# ----------------------------------------------------------------------
+# Full-pipeline services — DEFERRED until L2-L6 modules are in this repo.
+# Uncomment when ready; both depend on app.classifier, app.router,
+# app.delivery, app.ingestion.normalize, scripts.seed_database which
+# currently live only in the Phase 1 Drive folder.
+# ----------------------------------------------------------------------
+#
+#  - type: web
+#    name: apteker-router
+#    runtime: python
+#    plan: starter             # $7/mo
+#    region: oregon
+#    autoDeploy: false
+#    branch: main
+#    buildCommand: "pip install -r requirements.txt"
+#    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+#    healthCheckPath: /healthz
+#    envVars:
+#      - key: DB_URL
+#        sync: false
+#      - key: ANTHROPIC_API_KEY
+#        sync: false
+#      - key: SENTRY_DSN
+#        sync: false
+#      - key: SMS_BEARER_TOKEN_PRIMARY
+#        sync: false
+#      - key: SMS_BEARER_TOKEN_SECONDARY
+#        sync: false
+#      - key: ADMIN_BEARER_TOKEN
+#        sync: false
+#      - key: LOG_LEVEL
+#        value: INFO
+#      - key: CONFIDENCE_FLOOR
+#        value: "0.55"
+#      - key: LLM_DAILY_USD_CEILING
+#        value: "10.0"
+#      - key: PYTHON_VERSION
+#        value: "3.11.9"
+#
+#  - type: cron
+#    name: apteker-router-p0-escalate
+#    runtime: python
+#    plan: starter
+#    region: oregon
+#    branch: main
+#    schedule: "* * * * *"
+#    buildCommand: "pip install -r requirements.txt"
+#    startCommand: "python -m app.jobs.p0_escalate --once"
+#    envVars:
+#      - key: DB_URL
+#        sync: false
+#      - key: SENTRY_DSN
+#        sync: false
+#      - key: PYTHON_VERSION
+#        value: "3.11.9"
