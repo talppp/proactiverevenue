@@ -2,6 +2,18 @@
 """Generate an iOS Shortcut file (.shortcut plist) that forwards inbound
 SMS to the L1 webhook.
 
+  ⚠️ iOS 26 NOTE: Apple blocks importing UNSIGNED shortcut files on
+  iOS 26 ("Importing unsigned shortcut files is not supported").
+  This generator's output therefore only imports on:
+    - iOS <= 15 with "Allow Untrusted Shortcuts" on, OR
+    - any iOS if you first sign it on a Mac:
+        shortcuts sign -i forward_sms.shortcut -o signed.shortcut -m anyone
+  On Windows + iOS 26, ignore this script and build the Shortcut
+  manually — see docs/runbooks/sms_phone_install_ios26.md (FASTEST PATH,
+  one action). The server now stamps the timestamp, so the manual build
+  is a single Get-Contents-of-URL action.
+
+
 Usage:
     python scripts/build_ios_shortcut.py \\
         --url   https://apteker-router-l1.onrender.com \\

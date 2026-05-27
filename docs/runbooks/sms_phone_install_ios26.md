@@ -1,11 +1,68 @@
 # SMS-phone install — iOS 26 manual walkthrough
 
-This supersedes the iOS 15-style walkthrough in
-`sms_phone_install.md §2` for devices running iOS 26+. The action picker
-UI changed in iOS 26 — search returns fewer top-level matches, and
-several iOS 17/18 actions live in different categories now. This guide
-uses the **simplified 2-action path** (no separate Date / Format Date
-actions), which sidesteps the categorization changes.
+> **iOS 26.5 reality check:** Apple **blocks importing unsigned `.shortcut`
+> files** on iOS 26 ("Importing unsigned shortcut files is not supported").
+> The `scripts/build_ios_shortcut.py` generator therefore CANNOT be used on
+> iOS 26 unless you sign the file on a Mac (`shortcuts sign -m anyone`).
+> On Windows + iOS 26, the **manual build below is the only path.** Good
+> news: a server change (received_at_phone is now optional) cut it down to
+> a SINGLE action.
+
+---
+
+## FASTEST PATH — one action, ~3 minutes (iOS 26.5, no Mac needed)
+
+The webhook now stamps the receipt time itself, so the Shortcut only has
+to send two fields: who texted and what they said.
+
+### Trigger
+1. **Shortcuts** app → **Automation** tab → **+** → **Create Personal Automation**.
+2. Scroll to **Message** → tap.
+3. **Sender**: Anyone. **Message Contains**: type one space `" "`.
+   **Run Immediately**: ON. Tap **Next**.
+
+### The single action — Get Contents of URL
+1. On the "Do" screen, tap **choose...** (or the search field).
+2. Search **Get Contents of URL** → tap it.
+3. In the URL field paste:
+   ```
+   https://apteker-router-l1.onrender.com/webhooks/sms_phone
+   ```
+4. Tap the **▸ / ▼ expand arrow** on the action to reveal its options.
+5. **Method**: tap → **POST**.
+6. **Headers**: tap **Add new header** twice:
+   | Key | Text |
+   |---|---|
+   | `Authorization` | `Bearer ` then your SMS_BEARER_TOKEN_PRIMARY (one space after "Bearer") |
+   | `Content-Type` | `application/json` |
+7. **Request Body**: tap → change from "Form" to **JSON**.
+8. Tap **Add new field** twice, both **Text** type:
+   | Key | Value |
+   |---|---|
+   | `from_number` | tap the value box → **Select Variable** → pick **Sender** (from the Message trigger) |
+   | `body` | tap the value box → **Select Variable** → pick **Message** (from the trigger) |
+9. Tap **Next** → review → **Done**.
+
+That's the whole thing. No Date action, no Format Date, no Dictionary.
+
+### Self-test
+Have someone text your iPhone "test from automation", then on your laptop:
+```powershell
+.\scripts\smoke_test.ps1
+```
+Test 8 (`handed_off`) should be one higher than your last run.
+
+If your iPhone's "Sender"/"Message" variables are named differently in
+the trigger (some iOS builds label them "Content"), just pick whatever
+the trigger exposes for the sender and the message text.
+
+---
+
+## (Older / alternate paths below)
+
+The sections below are kept for reference: the 2-action and file-import
+approaches. On iOS 26.5 use the FASTEST PATH above. The 2-action version
+sidesteps the iOS-17/18 Date-action categorization changes.
 
 ## Prerequisites
 
