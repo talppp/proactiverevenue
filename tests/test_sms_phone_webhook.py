@@ -92,10 +92,30 @@ def test_pipeline_failure_leaves_row_for_recovery(client, store, pipeline):
 def test_rejects_malformed_payload(client):
     r = client.post(
         "/webhooks/sms_phone",
-        json={"from_number": "+1", "body": ""},  # missing received_at_phone, empty body
+        json={"from_number": "+1", "body": ""},  # empty body fails min_length
         headers=_auth(),
     )
     assert r.status_code == 422
+
+
+def test_accepts_payload_without_received_at_phone(client, store, pipeline):
+    """iOS Shortcuts can omit the timestamp; server stamps receipt time."""
+    minimal = {
+        "from_number": "+14045551234",
+        "body": "buyer wants a showing Saturday",
+    }
+    r = client.post("/webhooks/sms_phone", json=minimal, headers=_auth())
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "queued"
+    assert body["duplicate"] is False
+    assert len(body["msg_id"]) == 64
+    # The handoff still fires with a server-stamped timestamp.
+    assert len(pipeline.received) == 1
+    row = store.fetch(body["msg_id"])
+    assert row is not None
+    assert row.received_at_phone is not None
+    assert row.status == "handed_off"
 
 
 def test_returns_503_when_no_tokens_configured(client, monkeypatch):
