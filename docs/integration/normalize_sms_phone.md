@@ -30,12 +30,17 @@ Locate the dispatch table in `normalize.py` (looks something like):
 _NORMALIZERS = {
     "sms":          _normalize_sms,
     "whatsapp":     _normalize_whatsapp,
-    "gmail":        _normalize_gmail,
     "apple_mail":   _normalize_apple_mail,
-    "instagram":    _normalize_instagram,
     "test":         _normalize_test,
 }
 ```
+
+> **Phase 1 scope note (2026-05-21):** Gmail and Instagram inbound were
+> de-scoped. If you find references to `_normalize_gmail`,
+> `_normalize_instagram`, or their channels in `normalize.py`,
+> `routing_rules.yaml`, the dashboard, or tests — delete them. SMS,
+> WhatsApp, and Apple Mail remain. The newly added `sms_phone` channel
+> is added below.
 
 Add `sms_phone`. It can reuse `_normalize_sms` directly if its shape
 matches, or use the small wrapper below for clarity (and so L4 rules
