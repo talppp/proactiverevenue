@@ -70,8 +70,15 @@ The script:
 ## Verifying after the run
 
 ```powershell
-# Search for any leftover references the script may have missed
-Select-String -Path "C:\Users\USER\Documents\AI_Audit_Meetings_FILES\Natalie -Relator\Phase1_AI_Issue_Router\*.*" -Pattern "(?i)gmail|instagram" -List -Recurse
+# Search for any leftover references the script may have missed.
+# (Select-String has no -Recurse; recursion belongs on Get-ChildItem.)
+$root = "C:\Users\USER\Documents\AI_Audit_Meetings_FILES\Natalie -Relator\Phase1_AI_Issue_Router"
+
+Get-ChildItem -Path $root -Recurse -File -Include "*.py","*.md","*.yaml","*.yml","*.json","*.txt","*.toml","*.cfg","*.ini" |
+    Where-Object { $_.FullName -notmatch "\\(?:\.git|__pycache__|\.venv|\.pytest_cache|\.ruff_cache|proactiverevenue|backup|OLD)\\" } |
+    Select-String -Pattern "(?i)\bgmail\b|\binstagram\b" |
+    Select-Object Path, LineNumber, Line |
+    Format-Table -AutoSize -Wrap
 ```
 
 If the results only show comments like "removed", "deprecated", or
