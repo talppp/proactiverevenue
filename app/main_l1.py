@@ -70,7 +70,10 @@ async def _sms_poll_loop(app: FastAPI, interval: float) -> None:
         except asyncio.CancelledError:
             raise
         except Exception as e:  # pragma: no cover - operational
-            log.exception("sms_poll_iteration_failed", error=str(e))
+            # One-line warning, not a full traceback every tick — a DB
+            # outage would otherwise flood the logs. pool_pre_ping makes
+            # the next tick reconnect automatically once the DB is back.
+            log.warning("sms_poll_iteration_failed", error=repr(e))
         await asyncio.sleep(interval)
 
 
@@ -107,13 +110,32 @@ app.include_router(admin_router)
 
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
-    counts = app.state.sms_inbox_store.counts_by_status()
-    return {
-        "ok": True,
-        "layer": "l1_sms_phone",
-        "db": "postgres" if os.environ.get("DB_URL", "memory") != "memory" else "memory",
-        "counts": counts,
-    }
+    """Liveness + DB reachability.
+
+    Always returns HTTP 200 so a transient DB outage doesn't make Render
+    kill the deploy and crash-loop. The 'db' field reports the real state:
+      - "memory"   : in-process store
+      - "postgres" : DB reachable, counts included
+      - "error"    : DB configured but unreachable (degraded; service stays up)
+    """
+    using_pg = os.environ.get("DB_URL", "memory") not in ("", "memory")
+    try:
+        counts = app.state.sms_inbox_store.counts_by_status()
+        return {
+            "ok": True,
+            "layer": "l1_sms_phone",
+            "db": "postgres" if using_pg else "memory",
+            "counts": counts,
+        }
+    except Exception as exc:  # noqa: BLE001 - degrade, never crash the healthcheck
+        log.error("healthz_db_unreachable", error=repr(exc))
+        return {
+            "ok": True,
+            "layer": "l1_sms_phone",
+            "db": "error",
+            "error": "database unreachable",
+            "counts": {},
+        }
 
 
 @app.get("/")
