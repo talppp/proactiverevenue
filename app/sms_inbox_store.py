@@ -195,7 +195,18 @@ class PostgresSmsInboxStore:
         # Local import keeps the dependency optional for the in-memory path.
         from sqlalchemy import create_engine
 
-        self.engine = create_engine(db_url, future=True)
+        # pool_pre_ping: validate a pooled connection before using it, so a
+        #   dropped/stale connection (Supabase pooler recycling, network blip)
+        #   transparently reconnects instead of raising.
+        # pool_recycle: drop connections older than 5 min — the Supabase
+        #   transaction pooler closes idle ones, and a recycled handle would
+        #   otherwise surface as a confusing OperationalError.
+        self.engine = create_engine(
+            db_url,
+            future=True,
+            pool_pre_ping=True,
+            pool_recycle=300,
+        )
 
     def insert_new(
         self,

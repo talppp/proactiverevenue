@@ -67,12 +67,13 @@ The only viable path. Selected sub-variant after kick-off discussion:
 > App-Store-policy-compliant mechanism — no jailbreak, no private API.
 
 Rejected sub-variants and why:
-- **Email bridge (forward each SMS to Gmail, reuse our existing Gmail adapter):**
-  cheaper to implement but adds one external hop and 5–30 s of email-delivery
-  jitter. Kept as a fallback if the Shortcuts path proves flaky in field testing.
-- **Port number to Twilio:** carrier-grade reliability, but porting a personal
-  number is disruptive and requires a separate client decision. Out of scope for
-  Phase 1.
+- **Email bridge (forward each SMS to a dedicated inbox, route through an
+  email-channel adapter):** cheaper to implement but adds one external
+  hop and 5–30 s of email-delivery jitter. Out of scope after Phase 1
+  channel pruning (Gmail inbound was removed — see §11).
+- **Port number to Twilio:** carrier-grade reliability, but porting a
+  personal number is disruptive and requires a separate client
+  decision. Out of scope for Phase 1.
 
 ## 3. Architecture
 
@@ -351,9 +352,10 @@ Three candidate approaches when we decide to invest:
    `~/Library/Messages/chat.db` (Messages-in-iCloud-synced) every X seconds,
    POSTs deltas to the same `/webhooks/sms_phone` endpoint. Most reliable,
    no carrier change. ~1 day to build.
-2. **Email bridge.** Install a forwarder that sends every SMS to a dedicated
-   Gmail; the existing Gmail L1 adapter ingests it. Lowest dev cost
-   (~2 h), 5–30 s extra latency, one external hop in the data path.
+2. **Email bridge.** Install a forwarder that sends every SMS to a
+   dedicated inbox; the existing email adapter ingests it. Lowest dev
+   cost (~2 h), 5–30 s extra latency, one external hop in the data
+   path. **(Deferred / out of scope after Gmail channel was dropped.)**
 3. **Port to Twilio.** Carrier-grade, sub-second, but disruptive — separate
    client decision and number-port logistics.
 

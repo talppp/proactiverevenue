@@ -12,7 +12,7 @@ docs/runbooks/sms_phone_install.md for ops.
 from __future__ import annotations
 
 import hmac
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
@@ -34,7 +34,11 @@ class SmsPhonePayload(BaseModel):
     from_number: str = Field(..., min_length=1, max_length=64)
     to_number: str | None = Field(default=None, max_length=64)
     body: str = Field(..., min_length=1, max_length=4096)
-    received_at_phone: datetime
+    # Optional: iOS Shortcuts can't easily emit ISO-8601, and the
+    # automation fires once in real time (no auto-retry), so when the
+    # phone omits this we stamp server-receipt time. Senders that DO
+    # provide it (admin inject, tests, future Mac reader) still work.
+    received_at_phone: datetime | None = None
 
 
 def _verify_bearer(
@@ -131,11 +135,12 @@ async def receive_sms_phone(
     store = _get_store(request)
     pipeline = request.app.state.pipeline
 
+    received_at_phone = payload.received_at_phone or datetime.now(timezone.utc)
     row, was_new = store.insert_new(
         from_number=payload.from_number,
         to_number=payload.to_number,
         body=payload.body,
-        received_at_phone=payload.received_at_phone,
+        received_at_phone=received_at_phone,
     )
     log.info(
         "sms_phone_received",
