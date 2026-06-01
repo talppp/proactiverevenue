@@ -1,0 +1,106 @@
+{
+  "test_user_name": "Tester Buyer-Smith",
+  "test_user_phone": "+14045550199",
+  "test_user_email": "tester.buyer@example-mail.test",
+  "sms": {
+    "count": 1000,
+    "by_topic": {
+      "personal": 134,
+      "tenant_issue": 123,
+      "marketing_promo": 112,
+      "buyer_lead": 80,
+      "spam": 78,
+      "billing": 70,
+      "deal": 68,
+      "contract": 64,
+      "maintenance": 57,
+      "showing": 55,
+      "vendor": 43,
+      "admin": 38,
+      "seller_lead": 34,
+      "document": 27,
+      "scheduling": 17
+    },
+    "by_urgency": {
+      "P3": 433,
+      "P2": 315,
+      "P1": 167,
+      "P0": 85
+    },
+    "by_owner": {
+      "ARCHIVE": 324,
+      "Noa": 316,
+      "Nathalie": 254,
+      "Fabi": 106
+    }
+  },
+  "whatsapp": {
+    "count": 1000,
+    "by_topic": {
+      "tenant_issue": 135,
+      "personal": 123,
+      "marketing_promo": 95,
+      "buyer_lead": 79,
+      "spam": 68,
+      "maintenance": 66,
+      "contract": 66,
+      "deal": 65,
+      "showing": 54,
+      "billing": 49,
+      "vendor": 46,
+      "document": 46,
+      "seller_lead": 45,
+      "admin": 42,
+      "scheduling": 21
+    },
+    "by_urgency": {
+      "P3": 396,
+      "P2": 339,
+      "P1": 146,
+      "P0": 119
+    },
+    "by_owner": {
+      "Noa": 336,
+      "ARCHIVE": 286,
+      "Nathalie": 259,
+      "Fabi": 119
+    }
+  },
+  "email": {
+    "count": 1000,
+    "by_bucket": {
+      "rent_manage": 334,
+      "non_business": 333,
+      "buy_sell": 333
+    },
+    "by_topic": {
+      "personal": 152,
+      "tenant_issue": 138,
+      "marketing_promo": 101,
+      "spam": 80,
+      "deal": 79,
+      "buyer_lead": 74,
+      "contract": 69,
+      "showing": 57,
+      "maintenance": 49,
+      "billing": 44,
+      "document": 42,
+      "seller_lead": 40,
+      "admin": 32,
+      "vendor": 25,
+      "scheduling": 18
+    },
+    "by_urgency": {
+      "P3": 406,
+      "P2": 313,
+      "P1": 186,
+      "P0": 95
+    },
+    "by_owner": {
+      "ARCHIVE": 333,
+      "Noa": 279,
+      "Nathalie": 272,
+      "Fabi": 116
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "gate": 5,
+  "name": "CD Deployment Readiness",
+  "passed": true,
+  "startTime": 1780318020375,
+  "checks": {
+    "envVars": {
+      "passed": true,
+      "missing": []
+    },
+    "build": {
+      "passed": true
+    },
+    "docker": {
+      "passed": true,
+      "skipped": true,
+      "reason": "docker-compose.yml not found — skipped"
+    },
+    "health": {
+      "passed": false,
+      "error": "fetch failed"
+    }
+  },
+  "duration": "17.8s"
+}

@@ -1,0 +1,47 @@
+Secret 2 = TaYpMgFK3guXy2dU6nkRbpjy_j1IH5s1briRlUuwXLg
+Secret 1 = TYFesbM02AO0Ya-r2ql0M2VKcHWtMpyk6YhuAUhyKs4
+
+render URL = https://apteker-router-l1.onrender.com
+			 
+			 
+			 
+		 
+
+
+#####smoke Test : #####
+
+URL="https://apteker-router-l1.onrender.com"   # paste your actual URL
+SMS_TOKEN="TYFesbM02AO0Ya-r2ql0M2VKcHWtMpyk6YhuAUhyKs4"
+ADMIN_TOKEN="TaYpMgFK3guXy2dU6nkRbpjy_j1IH5s1briRlUuwXLg"
+
+
+# 1. Health
+Invoke-RestMethod -Uri "$URL/healthz"
+
+# 2. Reject without bearer — expect 401
+try {
+  Invoke-RestMethod -Uri "$URL/webhooks/sms_phone" -Method Post `
+    -ContentType "application/json" -Body '{}'
+} catch {
+  "status: $($_.Exception.Response.StatusCode.value__)"
+}
+
+# 3. Happy path
+$body = @{
+  from_number       = "+14045551234"
+  body              = "render smoke test"
+  received_at_phone = "2026-05-21T14:59:00+00:00"
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Uri "$URL/webhooks/sms_phone" -Method Post `
+  -Headers @{ Authorization = "Bearer $SMS_TOKEN" } `
+  -ContentType "application/json" -Body $body
+
+# 4. Same payload again — expect duplicate=true
+Invoke-RestMethod -Uri "$URL/webhooks/sms_phone" -Method Post `
+  -Headers @{ Authorization = "Bearer $SMS_TOKEN" } `
+  -ContentType "application/json" -Body $body
+
+# 5. Admin counts
+Invoke-RestMethod -Uri "$URL/admin/sms_inbox_raw/health" `
+  -Headers @{ Authorization = "Bearer $ADMIN_TOKEN" }

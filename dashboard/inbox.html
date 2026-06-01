@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inbox — {{MEMBER}}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0F1419;
+    --panel: #1A2027;
+    --border: #2A3340;
+    --text: #E2E8F0;
+    --muted: #8B98A5;
+    --accent: #1F4E79;
+  }
+  * { box-sizing: border-box }
+  body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--border); position: sticky; top: 0;
+  }
+  header h1 { margin: 0; font-size: 16px; color: var(--text); }
+  header .meta { color: var(--muted); font-size: 12px; }
+  #status {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    background: #2A3340; font-size: 11px; margin-left: 8px;
+  }
+  #status.live { background: #1B7A4B; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  .empty {
+    color: var(--muted); text-align: center; padding: 60px 16px;
+    border: 1px dashed var(--border); border-radius: 8px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-left: 4px solid var(--accent); border-radius: 6px;
+    padding: 12px 14px; margin-bottom: 10px;
+    transition: opacity 0.2s;
+  }
+  .card.handled { opacity: 0.45; }
+  .card .row1 {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 6px;
+  }
+  .urgency {
+    display: inline-block; padding: 1px 8px; border-radius: 10px;
+    font-weight: 700; font-size: 11px; color: white;
+  }
+  .topic { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+  .channel { color: var(--muted); font-size: 11px; }
+  .preview { color: var(--text); margin: 6px 0 4px; line-height: 1.45; }
+  .summary { color: var(--muted); font-size: 12px; margin-bottom: 6px; font-style: italic; }
+  .draft {
+    background: #131820; border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px 10px; font-size: 12px; color: #C4D2E0; margin-top: 6px;
+    white-space: pre-wrap;
+  }
+  .meta-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 8px; font-size: 11px; color: var(--muted);
+  }
+  button {
+    background: #2A3340; color: var(--text); border: 1px solid var(--border);
+    padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px;
+  }
+  button:hover { background: #344050; }
+  .unsure { background: #B8860B; }
+  .archive { border-left-color: #555; opacity: 0.6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Inbox — {{MEMBER_DISPLAY}}<span id="status">connecting</span></h1>
+  <div class="meta"><span id="count">0</span> cards · <span id="ts"></span></div>
+</header>
+<main>
+  <div id="empty" class="empty">No cards yet. Waiting for the AI Issue Router…</div>
+  <div id="cards"></div>
+</main>
+<script>
+  const MEMBER = "{{MEMBER}}";
+  const cards = document.getElementById("cards");
+  const empty = document.getElementById("empty");
+  const status = document.getElementById("status");
+  const count = document.getElementById("count");
+  const ts = document.getElementById("ts");
+
+  let total = 0;
+  function bump() {
+    total += 1;
+    count.textContent = total;
+    ts.textContent = new Date().toLocaleTimeString();
+    empty.style.display = "none";
+  }
+  function escape(s) {
+    if (s == null) return "";
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+  function render(card) {
+    const el = document.createElement("div");
+    el.className = "card" + (card.is_archive ? " archive" : "");
+    el.style.borderLeftColor = card.urgency_color || "#1F4E79";
+    el.innerHTML = `
+      <div class="row1">
+        <span>
+          <span class="urgency" style="background:${escape(card.urgency_color)}">${escape(card.urgency)}</span>
+          ${card.is_unsure ? '<span class="urgency unsure">UNSURE</span>' : ''}
+          <span class="topic">${escape(card.topic || "")}${card.secondary ? " + " + escape(card.secondary) : ""}</span>
+        </span>
+        <span class="channel">${escape(card.channel)} · ${escape(card.sender)}</span>
+      </div>
+      <div class="preview">${escape(card.preview)}</div>
+      ${card.summary ? `<div class="summary">${escape(card.summary)}</div>` : ""}
+      ${card.suggested_reply ? `<div class="draft">${escape(card.suggested_reply)}</div>` : ""}
+      <div class="meta-row">
+        <span>${escape(card.rule || "")} · ${escape(card.reason || "")}</span>
+        <span>
+          <button onclick="this.closest('.card').classList.toggle('handled');markHandled('${escape(card.message_id)}')">handled</button>
+        </span>
+      </div>
+    `;
+    cards.prepend(el);
+    bump();
+  }
+  function markHandled(msgId) {
+    fetch("/api/v1/handle/" + encodeURIComponent(msgId), {method:"POST"})
+      .catch(() => {});
+  }
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${proto}://${location.host}/ws/${MEMBER}`);
+    ws.onopen = () => { status.textContent = "live"; status.className = "live"; };
+    ws.onclose = () => { status.textContent = "reconnecting"; status.className = ""; setTimeout(connect, 1500); };
+    ws.onmessage = (e) => {
+      try { render(JSON.parse(e.data)); } catch (err) { console.warn(err); }
+    };
+  }
+  connect();
+</script>
+</body>
+</html>

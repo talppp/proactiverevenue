@@ -1,0 +1,23 @@
+{
+  "name": "dev-pipeline",
+  "version": "1.0.0",
+  "description": "Automated 6-gate dev pipeline with Claude auto-fix, GitHub Actions, Playwright E2E",
+  "scripts": {
+    "gate:1": "node agents/gate1-unit.js",
+    "gate:2": "node agents/gate2-system.js",
+    "gate:3": "node agents/gate3-stress.js",
+    "gate:4": "node agents/gate4-ci.js",
+    "gate:5": "node agents/gate5-cd.js",
+    "gate:6": "node agents/gate6-e2e.js",
+    "report": "node report/generate-report.js",
+    "run:all": "npm run gate:1 && npm run gate:2 && npm run gate:3 && npm run gate:4 && npm run gate:5 && npm run gate:6 && npm run report"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "@playwright/test": "^1.45.0",
+    "autocannon": "^7.15.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}

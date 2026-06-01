@@ -1,0 +1,68 @@
+name: cost-guard
+
+# Nightly check of yesterday's LLM spend against the configured ceiling.
+# Opens an issue automatically if the ceiling is breached.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"     # 07:00 UTC = 03:00 ET
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: pip install "psycopg[binary]"
+
+      - name: Query yesterday's LLM spend
+        id: spend
+        env:
+          PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          CEILING: ${{ vars.LLM_DAILY_USD_CEILING || '5.0' }}
+        run: |
+          if [ -z "$PROD_DATABASE_URL" ]; then
+            echo "No PROD_DATABASE_URL secret - skipping."
+            echo "skipped=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python <<'PY'
+          import os, psycopg
+          with psycopg.connect(os.environ["PROD_DATABASE_URL"]) as c, c.cursor() as cur:
+              cur.execute("""
+                  SELECT COALESCE(SUM(cost_usd), 0)
+                    FROM classification
+                   WHERE classified_at >= now() - interval '1 day'
+              """)
+              spend = float(cur.fetchone()[0])
+          ceiling = float(os.environ["CEILING"])
+          print(f"Yesterday's LLM spend: ${spend:.2f}  (ceiling ${ceiling:.2f})")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"spend={spend:.4f}\n")
+              f.write(f"ceiling={ceiling}\n")
+              f.write(f"breached={'1' if spend > ceiling else '0'}\n")
+          PY
+
+      - name: Open issue on breach
+        if: steps.spend.outputs.breached == '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const spend = "${{ steps.spend.outputs.spend }}";
+            const ceiling = "${{ steps.spend.outputs.ceiling }}";
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              title: `LLM cost ceiling breached: $${spend} > $${ceiling}`,
+              body:  `Cost-guard nightly check found yesterday's spend of **$${spend}** above the configured ceiling of **$${ceiling}**.\n\n` +
+                     `Investigate:\n` +
+                     `- recent message volume\n` +
+                     `- prompt-caching effectiveness (look for cache_read_input_tokens in logs)\n` +
+                     `- any runaway loops or unusually long bodies\n`,
+              labels: ["cost-guard", "ops"],
+            });

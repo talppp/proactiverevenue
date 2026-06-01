@@ -1,0 +1,11 @@
+{
+  "gate": 4,
+  "name": "CI Integration Tests",
+  "passed": true,
+  "skipped": false,
+  "attempts": 1,
+  "fixes": [],
+  "output": "..................................                                       [100%]\r\n34 passed in 0.47s\r\n",
+  "startTime": 1780318008299,
+  "duration": "3.1s"
+}

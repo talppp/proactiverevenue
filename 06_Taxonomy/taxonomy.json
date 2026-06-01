@@ -1,0 +1,359 @@
+{
+  "urgency": [
+    {
+      "code": "P0",
+      "name": "Emergency",
+      "sla": "15 min",
+      "example": "Tenant calling from a flooding apartment; lockout at 11pm; gas leak smell.",
+      "action": "Push + SMS to Nathalie immediately; ring after 5 min unread."
+    },
+    {
+      "code": "P1",
+      "name": "Same-day",
+      "sla": "4 hours",
+      "example": "Buyer offer with same-day deadline; closing tomorrow needs a doc.",
+      "action": "Push + queue card to assigned owner."
+    },
+    {
+      "code": "P2",
+      "name": "24-hour",
+      "sla": "24 hours",
+      "example": "Showing reschedule for next week; standard contract question.",
+      "action": "Queue card + appears in next daily digest."
+    },
+    {
+      "code": "P3",
+      "name": "Backlog",
+      "sla": "72 hours",
+      "example": "FYI updates; future inquiries with 'no rush'.",
+      "action": "Batched digest only."
+    }
+  ],
+  "topics": [
+    {
+      "code": "buyer_lead",
+      "label": "Buyer lead (new prospect)",
+      "primary": "Nathalie",
+      "fallback": "Fabi (non-core county)",
+      "examples": "First contact buyer: 'Are you the agent for 1234 Peach Ln?' / 'Looking for 3BR in Sandy Springs.'"
+    },
+    {
+      "code": "seller_lead",
+      "label": "Seller lead (new listing)",
+      "primary": "Nathalie",
+      "fallback": "Fabi (non-core county)",
+      "examples": "'I want to sell my house in Marietta.' / 'How much could I get for...'"
+    },
+    {
+      "code": "showing",
+      "label": "Showing logistics",
+      "primary": "Nathalie",
+      "fallback": "Fabi",
+      "examples": "'Can we move tomorrow's 4pm showing?' / 'I'll be 20 min late.'"
+    },
+    {
+      "code": "tenant_issue",
+      "label": "Tenant living-condition issue",
+      "primary": "Nathalie",
+      "fallback": "Noa",
+      "examples": "'AC not cooling' / 'water heater leaking' / 'neighbor noise complaint'."
+    },
+    {
+      "code": "maintenance",
+      "label": "Maintenance / repair coordination",
+      "primary": "Noa",
+      "fallback": "Fabi",
+      "examples": "Vendor scheduling, plumber dispatch, follow-up on a work order."
+    },
+    {
+      "code": "contract",
+      "label": "Contract review/exec",
+      "primary": "Noa",
+      "fallback": "Nathalie",
+      "examples": "'Please review the redline' / 'Need your signature on...'"
+    },
+    {
+      "code": "document",
+      "label": "Document request / upload",
+      "primary": "Noa",
+      "fallback": "Nathalie",
+      "examples": "Buyer asks for the seller's disclosure; lender requests proof of insurance."
+    },
+    {
+      "code": "vendor",
+      "label": "Vendor outreach / quotes",
+      "primary": "Noa",
+      "fallback": "Nathalie",
+      "examples": "Plumber availability, landscaper invoice question, painter quote follow-up."
+    },
+    {
+      "code": "admin",
+      "label": "General back-office admin",
+      "primary": "Noa",
+      "fallback": "Nathalie",
+      "examples": "Office supplies, software access, expense reimbursements."
+    },
+    {
+      "code": "scheduling",
+      "label": "Calendar / meeting requests",
+      "primary": "Noa",
+      "fallback": "Nathalie",
+      "examples": "'Can we meet Thursday?' / lender wants a 3-way call."
+    },
+    {
+      "code": "billing",
+      "label": "Invoicing / payments / deposits",
+      "primary": "Noa",
+      "fallback": "Nathalie",
+      "examples": "Earnest money status, vendor invoice approval, refund question."
+    },
+    {
+      "code": "deal",
+      "label": "Active deal updates",
+      "primary": "Nathalie",
+      "fallback": "Noa",
+      "examples": "Counter-offers, inspection negotiation, appraisal results."
+    },
+    {
+      "code": "vip_client",
+      "label": "VIP client (Google Contacts label)",
+      "primary": "Nathalie",
+      "fallback": "Nathalie",
+      "examples": "Anyone tagged VIP - hand to Nathalie regardless of topic."
+    },
+    {
+      "code": "personal",
+      "label": "Personal / non-business",
+      "primary": "ARCHIVE",
+      "fallback": "-",
+      "examples": "Family chat, friend invite, doctor appointment confirmation."
+    },
+    {
+      "code": "marketing_promo",
+      "label": "Marketing / promotional",
+      "primary": "ARCHIVE",
+      "fallback": "-",
+      "examples": "Vendor cold pitch, MailChimp campaign, generic newsletter."
+    },
+    {
+      "code": "spam",
+      "label": "Spam / phishing",
+      "primary": "ARCHIVE",
+      "fallback": "-",
+      "examples": "'Click here to claim your prize' / impersonation attempts."
+    }
+  ],
+  "use_cases": [
+    {
+      "persona": "Real-estate BUYER",
+      "scenarios": [
+        {
+          "scenario": "First contact - listing inquiry",
+          "urgency": "P2",
+          "topic": "buyer_lead",
+          "owner": "Nathalie",
+          "action": "Reply with disclosure brochure + book a 15-min call."
+        },
+        {
+          "scenario": "Buyer financing question",
+          "urgency": "P1",
+          "topic": "buyer_lead",
+          "owner": "Nathalie",
+          "action": "Loop in preferred lender; draft a reply."
+        },
+        {
+          "scenario": "Offer expires today",
+          "urgency": "P0",
+          "topic": "deal",
+          "owner": "Nathalie",
+          "action": "Real-time push; offer template in CRM card."
+        },
+        {
+          "scenario": "Buyer asks to view a non-Apteker listing",
+          "urgency": "P2",
+          "topic": "buyer_lead",
+          "owner": "Nathalie",
+          "action": "Confirm property and county; reroute to Fabi if non-core county."
+        },
+        {
+          "scenario": "Buyer wants disclosures / seller's package",
+          "urgency": "P2",
+          "topic": "document",
+          "owner": "Noa",
+          "action": "Pull from shared drive; reply via Nathalie."
+        },
+        {
+          "scenario": "Inspection results review",
+          "urgency": "P1",
+          "topic": "deal",
+          "owner": "Nathalie",
+          "action": "Summarize defects; suggest negotiation points."
+        }
+      ]
+    },
+    {
+      "persona": "Real-estate SELLER",
+      "scenarios": [
+        {
+          "scenario": "New listing inquiry from would-be seller",
+          "urgency": "P2",
+          "topic": "seller_lead",
+          "owner": "Nathalie",
+          "action": "Reply with CMA offer + intro call."
+        },
+        {
+          "scenario": "Photo / staging coordination",
+          "urgency": "P2",
+          "topic": "scheduling",
+          "owner": "Noa",
+          "action": "Calendar block + vendor email."
+        },
+        {
+          "scenario": "Price drop discussion",
+          "urgency": "P1",
+          "topic": "deal",
+          "owner": "Nathalie",
+          "action": "Pull comp data; draft talking points."
+        },
+        {
+          "scenario": "Closing date conflict",
+          "urgency": "P1",
+          "topic": "deal",
+          "owner": "Nathalie",
+          "action": "Lender + title coordination."
+        },
+        {
+          "scenario": "Seller wants to cancel listing",
+          "urgency": "P1",
+          "topic": "contract",
+          "owner": "Noa",
+          "action": "Reference cancellation clause; flag for Nathalie."
+        }
+      ]
+    },
+    {
+      "persona": "Real-estate TENANT (existing managed property)",
+      "scenarios": [
+        {
+          "scenario": "AC / heat not working",
+          "urgency": "P0",
+          "topic": "tenant_issue",
+          "owner": "Nathalie",
+          "action": "Dispatch vendor; escalate if temp extreme."
+        },
+        {
+          "scenario": "Leak / water damage",
+          "urgency": "P0",
+          "topic": "tenant_issue",
+          "owner": "Nathalie",
+          "action": "Dispatch plumber; document with photo request."
+        },
+        {
+          "scenario": "Lockout / lost key",
+          "urgency": "P0",
+          "topic": "tenant_issue",
+          "owner": "Nathalie",
+          "action": "Locksmith or emergency code."
+        },
+        {
+          "scenario": "Rent payment confusion",
+          "urgency": "P1",
+          "topic": "billing",
+          "owner": "Noa",
+          "action": "Reconcile ACH; reply with statement."
+        },
+        {
+          "scenario": "Lease renewal question",
+          "urgency": "P2",
+          "topic": "contract",
+          "owner": "Noa",
+          "action": "Send renewal template with rate."
+        },
+        {
+          "scenario": "Noise / neighbor complaint",
+          "urgency": "P2",
+          "topic": "tenant_issue",
+          "owner": "Nathalie",
+          "action": "Document; if recurring, notify HOA."
+        },
+        {
+          "scenario": "Move-out notice",
+          "urgency": "P2",
+          "topic": "contract",
+          "owner": "Noa",
+          "action": "Trigger move-out checklist."
+        },
+        {
+          "scenario": "Maintenance vendor follow-up",
+          "urgency": "P2",
+          "topic": "maintenance",
+          "owner": "Noa",
+          "action": "Status check + ETA update to tenant."
+        },
+        {
+          "scenario": "Pest control request",
+          "urgency": "P2",
+          "topic": "maintenance",
+          "owner": "Noa",
+          "action": "Vendor dispatch + tenant communication."
+        }
+      ]
+    },
+    {
+      "persona": "PROPERTY MANAGEMENT (Nathalie's existing managed portfolio)",
+      "scenarios": [
+        {
+          "scenario": "Vendor invoice approval",
+          "urgency": "P3",
+          "topic": "billing",
+          "owner": "Noa",
+          "action": "Reconcile against work order."
+        },
+        {
+          "scenario": "HOA notice",
+          "urgency": "P2",
+          "topic": "admin",
+          "owner": "Noa",
+          "action": "File + notify Nathalie if action needed."
+        },
+        {
+          "scenario": "Insurance renewal",
+          "urgency": "P2",
+          "topic": "admin",
+          "owner": "Noa",
+          "action": "Track expiry; renew."
+        },
+        {
+          "scenario": "Tax / mill levy notice",
+          "urgency": "P2",
+          "topic": "admin",
+          "owner": "Noa",
+          "action": "File; flag if discrepancy."
+        }
+      ]
+    }
+  ],
+  "team_tags": [
+    {
+      "name": "Nathalie",
+      "tag": "tag:nathalie",
+      "role": "Owner; buyer/seller leads, deals, escalations, VIP handling.",
+      "counties": "Core counties: Fulton, DeKalb.",
+      "after_hours": "After-hours P0 OK."
+    },
+    {
+      "name": "Fabi",
+      "tag": "tag:fabi",
+      "role": "Agent for properties OUTSIDE core counties (Cobb, Gwinnett, Forsyth, Cherokee).",
+      "counties": "Buyer/seller leads, showings, tenant issues in her counties.",
+      "after_hours": "After-hours OFF (P0 reroutes to Nathalie)."
+    },
+    {
+      "name": "Noa",
+      "tag": "tag:noa",
+      "role": "Back-office; contracts, documents, vendor coordination, scheduling, admin, billing.",
+      "counties": "County-agnostic.",
+      "after_hours": "After-hours OFF (queued to next morning)."
+    }
+  ]
+}

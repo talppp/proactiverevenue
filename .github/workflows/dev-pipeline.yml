@@ -1,0 +1,265 @@
+name: Dev Pipeline — Apteker AI Issue Router
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# All gates run sequentially as steps in one job so auto-fix patches accumulate.
+# The report job always runs (if: always()) and posts a PR comment.
+
+jobs:
+  # ══════════════════════════════════════════════════════════════════
+  pipeline:
+    name: "Pipeline — Gates 1–6"
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: apteker
+          POSTGRES_PASSWORD: apteker
+          POSTGRES_DB: apteker
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U apteker"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_URL: memory        # Gates 1-4 use in-memory store (no Postgres needed)
+      ANTHROPIC_API_KEY: "" # Stub LLM for test suite
+
+    steps:
+      # ── Checkout + setup runtimes ──────────────────────────────────
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # ── Install project dependencies ───────────────────────────────
+      - name: Install Python project deps
+        run: pip install -e ".[dev]"
+
+      - name: Install Node pipeline deps
+        run: npm ci
+        working-directory: dev-pipeline
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: dev-pipeline
+
+      # ── Validate config files ──────────────────────────────────────
+      - name: Validate routing_rules.yaml + taxonomy.json
+        run: |
+          python -c "
+          import yaml,json,pathlib
+          y=yaml.safe_load(pathlib.Path('04_Rules_and_Routing/routing_rules.yaml').read_text())
+          assert y['team']['nathalie']['counties']==['Fulton','DeKalb'], 'routing_rules mismatch'
+          t=json.loads(pathlib.Path('06_Taxonomy/taxonomy.json').read_text())
+          assert len(t['urgency'])==4 and len(t['topics'])>=15, 'taxonomy mismatch'
+          print('configs OK')"
+
+      # ── Step summary header ────────────────────────────────────────
+      - name: Init step summary
+        run: |
+          echo "## Dev Pipeline — Apteker AI Issue Router" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Gate | Duration | Notes |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------|----------|-------|" >> $GITHUB_STEP_SUMMARY
+
+      # ── Gate 1: Unit tests ─────────────────────────────────────────
+      - name: "Gate 1 — Unit Tests + Auto-Fix"
+        id: gate1
+        run: node agents/gate1-unit.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT: ${{ github.workspace }}
+          DB_URL: memory
+
+      - name: Upload gate 1 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate1-result
+          path: dev-pipeline/.pipeline/gate1.json
+
+      # ── Gate 2: System / pipeline tests ───────────────────────────
+      - name: "Gate 2 — System Tests + Auto-Fix"
+        id: gate2
+        run: node agents/gate2-system.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT: ${{ github.workspace }}
+          DB_URL: memory
+
+      - name: Upload gate 2 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate2-result
+          path: dev-pipeline/.pipeline/gate2.json
+
+      # ── Gate 3: Stress + race conditions ──────────────────────────
+      # Pytest stress suite runs via TestClient (no live server needed).
+      # HTTP autocannon skipped if server isn't running (gate is resilient).
+      - name: "Gate 3 — Stress, Sanity & Race Conditions"
+        id: gate3
+        run: node agents/gate3-stress.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT: ${{ github.workspace }}
+          DB_URL: memory
+          GATE3_PYTEST_CMD: "pytest proactiverevenue/tests/stress/ -v --tb=short"
+          SANITY_URL: "http://localhost:8000/healthz"
+          STRESS_TARGET: "http://localhost:8000"
+          STRESS_DURATION: "5"
+          STRESS_CONNECTIONS: "5"
+          RACE_ENDPOINT: "/healthz"
+
+      - name: Upload gate 3 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate3-result
+          path: dev-pipeline/.pipeline/gate3.json
+
+      # ── Gate 4: Full CI run + lint ─────────────────────────────────
+      - name: "Gate 4 — CI Integration Tests"
+        id: gate4
+        run: node agents/gate4-ci.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT: ${{ github.workspace }}
+          DB_URL: memory
+          GATE4_CMD: "pytest -q && ruff check ."
+
+      - name: Upload gate 4 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate4-result
+          path: dev-pipeline/.pipeline/gate4.json
+
+      # ── Gate 5: CD readiness ───────────────────────────────────────
+      - name: "Gate 5 — CD Deployment Readiness"
+        id: gate5
+        run: node agents/gate5-cd.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT: ${{ github.workspace }}
+          HEALTH_URL: "http://localhost:8000/healthz"
+          REQUIRED_ENV_VARS: "DB_URL"
+          BUILD_CMD: 'pip install -e ".[dev]" -q'
+          DB_URL: memory
+
+      - name: Upload gate 5 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate5-result
+          path: dev-pipeline/.pipeline/gate5.json
+
+      # ── Gate 6: Full E2E — Playwright, 3 agent environments ───────
+      # Starts uvicorn, runs Playwright against live server, shuts down.
+      - name: "Start uvicorn for Gate 6"
+        run: |
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          echo $! > /tmp/uvicorn.pid
+          # Wait for server to be ready
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8000/healthz && break
+            echo "Waiting for server... ($i)"
+            sleep 1
+          done
+        env:
+          DB_URL: memory
+
+      - name: "Gate 6 — Full E2E Multi-Environment (Playwright)"
+        id: gate6
+        run: node agents/gate6-e2e.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT: ${{ github.workspace }}
+          E2E_BROWSERS: chromium
+          E2E_URL_NATHALIE: "http://localhost:8000"
+          E2E_URL_FABI: "http://localhost:8000"
+          E2E_URL_SYS: "http://localhost:8000"
+
+      - name: Stop uvicorn
+        if: always()
+        run: kill $(cat /tmp/uvicorn.pid) 2>/dev/null || true
+
+      - name: Upload gate 6 results + screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate6-result
+          path: |
+            dev-pipeline/.pipeline/gate6.json
+            dev-pipeline/.pipeline/screenshots/
+            dev-pipeline/.pipeline/videos/
+
+  # ══════════════════════════════════════════════════════════════════
+  report:
+    name: "Generate Summary Report"
+    needs: pipeline
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Node pipeline deps
+        run: npm ci
+        working-directory: dev-pipeline
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "gate*-result"
+          path: dev-pipeline/.pipeline
+          merge-multiple: true
+
+      - name: Generate report
+        run: node report/generate-report.js
+        working-directory: dev-pipeline
+
+      - name: Upload final report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-report
+          path: dev-pipeline/.pipeline/reports/
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const mdPath = 'dev-pipeline/.pipeline/reports/summary.md';
+            if (!fs.existsSync(mdPath)) return;
+            const body = fs.readFileSync(mdPath, 'utf8').slice(0, 65000);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });

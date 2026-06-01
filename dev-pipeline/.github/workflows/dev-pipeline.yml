@@ -1,0 +1,210 @@
+name: Dev Pipeline
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# All 6 gates run sequentially in one job so auto-fix patches accumulate in the workspace.
+# The report job always runs (if: always()) and posts a PR comment with the summary.
+
+jobs:
+  # ══════════════════════════════════════════════════════════════════
+  pipeline:
+    name: "Pipeline — Gates 1–6"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dev-pipeline/package-lock.json
+
+      - name: Install pipeline dependencies
+        run: npm ci
+        working-directory: dev-pipeline
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: dev-pipeline
+
+      # ── Write GHA step-summary header ───────────────────────────
+      - name: Init step summary
+        run: |
+          echo "## Dev Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Gate | Duration | Notes |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------|----------|-------|" >> $GITHUB_STEP_SUMMARY
+
+      # ── Gate 1 — Unit Tests ──────────────────────────────────────
+      - name: "Gate 1 — Unit Tests + Auto-Fix"
+        id: gate1
+        run: node agents/gate1-unit.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT:      ${{ github.workspace }}
+          GATE1_CMD:         ${{ vars.GATE1_CMD }}
+
+      - name: Upload gate 1 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate1-result
+          path: dev-pipeline/.pipeline/gate1.json
+
+      # ── Gate 2 — System Tests ────────────────────────────────────
+      - name: "Gate 2 — System Tests + Auto-Fix"
+        id: gate2
+        run: node agents/gate2-system.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT:      ${{ github.workspace }}
+          GATE2_CMD:         ${{ vars.GATE2_CMD }}
+
+      - name: Upload gate 2 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate2-result
+          path: dev-pipeline/.pipeline/gate2.json
+
+      # ── Gate 3 — Stress + Race Conditions ───────────────────────
+      - name: "Gate 3 — Stress, Sanity & Race Conditions"
+        id: gate3
+        run: node agents/gate3-stress.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          STRESS_TARGET:      ${{ vars.STRESS_TARGET }}
+          STRESS_DURATION:    ${{ vars.STRESS_DURATION || '10' }}
+          STRESS_CONNECTIONS: ${{ vars.STRESS_CONNECTIONS || '10' }}
+          RACE_WORKERS:       ${{ vars.RACE_WORKERS || '20' }}
+          SANITY_URL:         ${{ vars.SANITY_URL }}
+
+      - name: Upload gate 3 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate3-result
+          path: dev-pipeline/.pipeline/gate3.json
+
+      # ── Gate 4 — CI Integration Tests ───────────────────────────
+      - name: "Gate 4 — CI Integration Tests + Auto-Fix"
+        id: gate4
+        run: node agents/gate4-ci.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT:      ${{ github.workspace }}
+          GATE4_CMD:         ${{ vars.GATE4_CMD }}
+
+      - name: Upload gate 4 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate4-result
+          path: dev-pipeline/.pipeline/gate4.json
+
+      # ── Gate 5 — CD Readiness ────────────────────────────────────
+      - name: "Gate 5 — CD Deployment Readiness"
+        id: gate5
+        run: node agents/gate5-cd.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT:      ${{ github.workspace }}
+          HEALTH_URL:        ${{ vars.HEALTH_URL }}
+          REQUIRED_ENV_VARS: ${{ vars.REQUIRED_ENV_VARS || 'NODE_ENV' }}
+          BUILD_CMD:         ${{ vars.BUILD_CMD }}
+
+      - name: Upload gate 5 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate5-result
+          path: dev-pipeline/.pipeline/gate5.json
+
+      # ── Gate 6 — Full E2E Multi-Environment ─────────────────────
+      - name: "Gate 6 — Full E2E Multi-Environment (Playwright)"
+        id: gate6
+        run: node agents/gate6-e2e.js
+        working-directory: dev-pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROJECT_ROOT:      ${{ github.workspace }}
+          E2E_BROWSERS:      ${{ vars.E2E_BROWSERS || 'chromium,firefox,webkit' }}
+          E2E_URL_A:         ${{ vars.E2E_URL_A || 'http://localhost:3001' }}
+          E2E_URL_B:         ${{ vars.E2E_URL_B || 'http://localhost:3002' }}
+          E2E_URL_SYS:       ${{ vars.E2E_URL_SYS || 'http://localhost:3000' }}
+          E2E_FQDN_A:        ${{ vars.E2E_FQDN_A || 'user-a.internal' }}
+          E2E_FQDN_B:        ${{ vars.E2E_FQDN_B || 'user-b.internal' }}
+          E2E_FQDN_SYS:      ${{ vars.E2E_FQDN_SYS || 'api.internal' }}
+
+      - name: Upload gate 6 results + screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate6-result
+          path: |
+            dev-pipeline/.pipeline/gate6.json
+            dev-pipeline/.pipeline/screenshots/
+            dev-pipeline/.pipeline/videos/
+
+  # ══════════════════════════════════════════════════════════════════
+  report:
+    name: "Generate Summary Report"
+    needs: pipeline
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dev-pipeline/package-lock.json
+
+      - name: Install pipeline dependencies
+        run: npm ci
+        working-directory: dev-pipeline
+
+      # Download all gate result artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "gate*-result"
+          path: dev-pipeline/.pipeline
+          merge-multiple: true
+
+      - name: Generate report
+        run: node report/generate-report.js
+        working-directory: dev-pipeline
+
+      - name: Upload final report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-report
+          path: dev-pipeline/.pipeline/reports/
+
+      # Post PR comment with Markdown summary (on pull_request events only)
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const mdPath = 'dev-pipeline/.pipeline/reports/summary.md';
+            if (!fs.existsSync(mdPath)) return;
+            const body = fs.readFileSync(mdPath, 'utf8').slice(0, 65000);
+            await github.rest.issues.createComment({
+              owner:    context.repo.owner,
+              repo:     context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });

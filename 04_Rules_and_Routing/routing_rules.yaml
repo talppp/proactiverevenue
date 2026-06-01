@@ -1,0 +1,137 @@
+# AI Issue Router - Routing Rules v1.0
+# Apteker Realty / ProActive Revenue / 2026-05-17
+# Evaluation order: filters -> urgency -> topic+geo -> owner -> overflow -> delivery
+# This file is read by the Python classifier service (Option C hybrid).
+
+team:
+  nathalie:
+    role: owner
+    counties: [Fulton, DeKalb]              # core territory
+    topics:  [buyer_lead, seller_lead, showing, deal, escalation, vip_client]
+    after_hours_ok: true                    # accepts P0 outside business hours
+  fabi:
+    role: agent
+    counties: [Cobb, Gwinnett, Forsyth, Cherokee]   # all NON-core counties
+    topics:  [buyer_lead, seller_lead, showing, tenant_issue, maintenance]
+    after_hours_ok: false
+  noa:
+    role: back_office
+    counties: [ANY]                         # county-agnostic
+    topics:  [contract, document, vendor, admin, scheduling, billing]
+    after_hours_ok: false
+
+filters:
+  # Drop before classifier runs (saves LLM tokens).
+  - id: spam_obvious
+    when: "regex_match(body, '^(http|view this offer|click here)') AND no_known_sender"
+    action: archive
+  - id: marketing_promo
+    when: "sender_domain in ['mailchimp.com','sendgrid.net','constantcontact.com']"
+    action: archive
+  - id: personal_keywords
+    when: "topic == 'personal' AND confidence > 0.8"
+    action: archive_personal
+  - id: family_alias
+    when: "sender_email in family_aliases_list"
+    action: archive_personal
+
+urgency_rules:
+  # Output of urgency classifier overrides keyword bumps only upward, never down.
+  P0_emergency:
+    sla_minutes: 15
+    keyword_signals: [emergency, flood, fire, gas leak, no water, broken lock, locked out, burst pipe, no heat, no AC, smoke, child stuck]
+    sentiment: panic|alarmed
+    deliver: [push_now, sms_owner, escalate_if_unread_5min]
+  P1_same_day:
+    sla_minutes: 240
+    keyword_signals: [today, ASAP, urgent, deadline, closing tomorrow, offer expires]
+    deliver: [push_now, queue_card]
+  P2_24h:
+    sla_minutes: 1440
+    keyword_signals: [this week, when you can, soon, please reply]
+    deliver: [queue_card, batched_digest]
+  P3_backlog:
+    sla_minutes: 4320       # 3 days
+    keyword_signals: [no rush, fyi, info request, future]
+    deliver: [batched_digest]
+
+topic_routing:
+  - topic: buyer_lead
+    primary_owner: nathalie
+    fallback: fabi
+    notes: "If county is in fabi's territory and Nathalie is busy (>3 active threads), route to Fabi."
+  - topic: seller_lead
+    primary_owner: nathalie
+    fallback: fabi
+  - topic: showing
+    primary_owner: nathalie
+    fallback: fabi
+  - topic: tenant_issue
+    primary_owner: nathalie
+    fallback: noa
+    notes: "Maintenance escalations go through Noa for vendor dispatch."
+  - topic: maintenance
+    primary_owner: noa
+    fallback: fabi
+    notes: "Noa coordinates vendor; if vendor not available in county, hands to Fabi."
+  - topic: contract
+    primary_owner: noa
+    fallback: nathalie
+  - topic: document
+    primary_owner: noa
+    fallback: nathalie
+  - topic: vendor
+    primary_owner: noa
+    fallback: nathalie
+  - topic: admin
+    primary_owner: noa
+    fallback: nathalie
+  - topic: scheduling
+    primary_owner: noa
+    fallback: nathalie
+  - topic: billing
+    primary_owner: noa
+    fallback: nathalie
+  - topic: deal
+    primary_owner: nathalie
+    fallback: noa
+  - topic: vip_client
+    primary_owner: nathalie
+    fallback: nathalie       # never offload VIP
+
+geo_overrides:
+  # Geography overrides default topic ownership when applicable.
+  - when: "county in fabi.counties AND topic in [buyer_lead, seller_lead, showing]"
+    route_to: fabi
+    notes: "Fabi owns properties outside Nathalie's core counties."
+  - when: "topic == contract OR topic == document OR topic == admin"
+    route_to: noa
+    notes: "Geography does not matter for back-office work."
+
+after_hours_policy:
+  start: "19:00"
+  end:   "08:00"
+  timezone: "America/New_York"
+  rules:
+    - "P0 -> push to whoever has after_hours_ok=true (Nathalie)."
+    - "P1 -> queue, deliver next business morning at 07:30."
+    - "P2/P3 -> queue, batch into 09:00 digest."
+
+vip_client_list:
+  # Auto-escalate any inbound from these contacts to Nathalie regardless of topic.
+  source: "google_contacts label:VIP"
+  fallback_to_nathalie: true
+
+deduplication:
+  window_seconds: 60
+  key: "channel + sender + sha1(body[:200])"
+
+confidence_floor:
+  classifier_min_confidence: 0.55
+  action_below_floor: "route_to_nathalie_with_unsure_flag"
+
+escalation_paths:
+  - condition: "urgency == P0 AND no_human_response_in_minutes >= 5"
+    action:    "ring owner phone via Twilio voice prompt"
+  - condition: "urgency == P1 AND no_human_response_in_minutes >= 60"
+    action:    "second push + cc fallback owner"
