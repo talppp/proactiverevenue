@@ -4,12 +4,27 @@ const path = require('path');
 const { fixBug, applyPatches } = require('./claude-fixer');
 const config = require('../pipeline.config');
 
+// ── Auto-fix eligibility ─────────────────────────────────────────────────────
+// Auto-fix is skipped when:
+//   1. SKIP_AUTO_FIX=true  (explicit opt-out)
+//   2. ANTHROPIC_API_KEY is missing or empty  (no credentials → would always 400)
+// Either condition makes a failed test a hard failure — no LLM calls attempted.
+function autoFixEnabled() {
+  if (process.env.SKIP_AUTO_FIX === 'true') return false;
+  if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.trim() === '') return false;
+  return true;
+}
+
 async function runGate({ gateNumber, gateName, command, testFile, sourceFiles = [], maxFixes = 3, outputFile }) {
+  const fixEnabled = autoFixEnabled();
+  const effectiveMaxFixes = fixEnabled ? maxFixes : 0;
+
   const result = {
     gate: gateNumber,
     name: gateName,
     passed: false,
     skipped: false,
+    autoFixEnabled: fixEnabled,
     attempts: 0,
     fixes: [],
     output: '',
@@ -20,11 +35,18 @@ async function runGate({ gateNumber, gateName, command, testFile, sourceFiles = 
   const bar = '═'.repeat(62);
   console.log(`\n${bar}`);
   console.log(`🚦 Gate ${gateNumber}: ${gateName}`);
+  if (!fixEnabled) {
+    const reason = process.env.SKIP_AUTO_FIX === 'true'
+      ? 'SKIP_AUTO_FIX=true'
+      : 'ANTHROPIC_API_KEY not set';
+    console.log(`   ℹ  Auto-fix disabled (${reason}) — tests run once, pass or fail`);
+  }
   console.log(bar);
 
-  for (let attempt = 0; attempt <= maxFixes; attempt++) {
+  for (let attempt = 0; attempt <= effectiveMaxFixes; attempt++) {
     result.attempts = attempt + 1;
-    console.log(`\n  ▶ Run ${attempt + 1} / ${maxFixes + 1}...`);
+    const totalRuns = effectiveMaxFixes + 1;
+    console.log(`\n  ▶ Run ${attempt + 1}${totalRuns > 1 ? ` / ${totalRuns}` : ''}...`);
 
     try {
       const output = execSync(command, {
@@ -34,7 +56,6 @@ async function runGate({ gateNumber, gateName, command, testFile, sourceFiles = 
         cwd: config.projectRoot,
         env: {
           ...process.env,
-          // Python project defaults — in-memory store, stub LLM
           DB_URL:            process.env.DB_URL            || 'memory',
           ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
           PYTHONPATH:        process.env.PYTHONPATH        || config.projectRoot,
@@ -50,8 +71,8 @@ async function runGate({ gateNumber, gateName, command, testFile, sourceFiles = 
       console.log('  ❌ FAILED');
       console.log(errorOutput.slice(0, 800).split('\n').map(l => '    ' + l).join('\n'));
 
-      if (attempt < maxFixes) {
-        console.log(`\n  🤖 Claude auto-fix ${attempt + 1} / ${maxFixes}...`);
+      if (fixEnabled && attempt < effectiveMaxFixes) {
+        console.log(`\n  🤖 Claude auto-fix ${attempt + 1} / ${effectiveMaxFixes}...`);
         try {
           const fix = await fixBug({
             errorOutput,
@@ -71,8 +92,16 @@ async function runGate({ gateNumber, gateName, command, testFile, sourceFiles = 
             patches: patchResults,
           });
         } catch (fixErr) {
-          console.error(`  ⚠  Auto-fix error: ${fixErr.message}`);
-          result.fixes.push({ attempt: attempt + 1, error: fixErr.message });
+          // ── Resilient: LLM errors never fail the gate ──────────────────
+          // A billing error, network timeout, or bad response from Claude
+          // must NOT mask a real test failure — we log and move on.
+          const isCredentialError = /credit|billing|quota|401|403|400/i.test(fixErr.message);
+          const tag = isCredentialError ? '💳 billing/credential issue' : '⚠  LLM error';
+          console.warn(`  ${tag}: ${fixErr.message}`);
+          console.warn('     Tests failed but auto-fix could not run — see error above.');
+          result.fixes.push({ attempt: attempt + 1, error: fixErr.message, skippedReason: tag });
+          // Stop retrying — remaining attempts won't help without working LLM access
+          break;
         }
       }
     }
@@ -86,9 +115,10 @@ async function runGate({ gateNumber, gateName, command, testFile, sourceFiles = 
   }
 
   if (process.env.GITHUB_STEP_SUMMARY) {
-    const icon = result.passed ? '✅' : '❌';
+    const icon   = result.passed ? '✅' : '❌';
+    const fixNote = !fixEnabled ? 'auto-fix off' : `${result.fixes.length} fix(es)`;
     fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-      `| ${icon} Gate ${gateNumber} | ${gateName} | ${result.duration} | ${result.fixes.length} fix(es) |\n`);
+      `| ${icon} Gate ${gateNumber} | ${gateName} | ${result.duration} | ${fixNote} |\n`);
   }
 
   return result;

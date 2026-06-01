@@ -31,6 +31,9 @@ jobs:
     env:
       DB_URL: memory        # Gates 1-4 use in-memory store (no Postgres needed)
       ANTHROPIC_API_KEY: "" # Stub LLM for test suite
+      # Auto-fix is off by default so a missing/empty API key never breaks CI.
+      # Set SKIP_AUTO_FIX=false in repo vars + add ANTHROPIC_API_KEY secret to enable it.
+      SKIP_AUTO_FIX: ${{ vars.SKIP_AUTO_FIX || 'true' }}
 
     steps:
       # ── Checkout + setup runtimes ──────────────────────────────────
@@ -83,6 +86,7 @@ jobs:
         working-directory: dev-pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SKIP_AUTO_FIX: ${{ vars.SKIP_AUTO_FIX || 'true' }}
           PROJECT_ROOT: ${{ github.workspace }}
           DB_URL: memory
 
@@ -100,6 +104,7 @@ jobs:
         working-directory: dev-pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SKIP_AUTO_FIX: ${{ vars.SKIP_AUTO_FIX || 'true' }}
           PROJECT_ROOT: ${{ github.workspace }}
           DB_URL: memory
 
@@ -119,6 +124,7 @@ jobs:
         working-directory: dev-pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SKIP_AUTO_FIX: ${{ vars.SKIP_AUTO_FIX || 'true' }}
           PROJECT_ROOT: ${{ github.workspace }}
           DB_URL: memory
           GATE3_PYTEST_CMD: "pytest proactiverevenue/tests/stress/ -v --tb=short"
@@ -142,6 +148,7 @@ jobs:
         working-directory: dev-pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SKIP_AUTO_FIX: ${{ vars.SKIP_AUTO_FIX || 'true' }}
           PROJECT_ROOT: ${{ github.workspace }}
           DB_URL: memory
           GATE4_CMD: "pytest -q && ruff check ."
@@ -160,6 +167,7 @@ jobs:
         working-directory: dev-pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SKIP_AUTO_FIX: ${{ vars.SKIP_AUTO_FIX || 'true' }}
           PROJECT_ROOT: ${{ github.workspace }}
           HEALTH_URL: "http://localhost:8000/healthz"
           REQUIRED_ENV_VARS: "DB_URL"
@@ -194,6 +202,7 @@ jobs:
         working-directory: dev-pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SKIP_AUTO_FIX: ${{ vars.SKIP_AUTO_FIX || 'true' }}
           PROJECT_ROOT: ${{ github.workspace }}
           E2E_BROWSERS: chromium
           E2E_URL_NATHALIE: "http://localhost:8000"
