@@ -182,7 +182,7 @@ function loadScenarios(testDir) {
       run: async (pages, envs) => {
         const systemEnv = envs.find(e => e.role === 'system-api');
         if (!systemEnv) return;
-        const res = await pages[systemEnv.name].goto(`${systemEnv.baseURL}/health`);
+        const res = await pages[systemEnv.name].goto(`${systemEnv.baseURL}/healthz`);
         if (!res || res.status() >= 400) throw new Error(`Health returned ${res?.status()}`);
       },
     },
