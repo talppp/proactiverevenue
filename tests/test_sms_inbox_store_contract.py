@@ -33,7 +33,8 @@ def _new_pg():
     from sqlalchemy import text
 
     with s.engine.begin() as conn:
-        conn.execute(text("TRUNCATE sms_inbox_raw"))
+        conn.execute(text("TRUNCATE sms_inbox_raw CASCADE"))
+        conn.execute(text("TRUNCATE llm_spend"))
     return s
 
 
@@ -82,6 +83,41 @@ def test_reset_for_replay_only_dead_letter(any_store):
     assert any_store.reset_for_replay(row.msg_id) is True
     r = any_store.fetch(row.msg_id)
     assert r.status == "new" and r.attempts == 0 and r.last_error is None
+
+
+def test_recent_by_sender_orders_and_limits(any_store):
+    for i in range(4):
+        any_store.insert_new(
+            "+1404", None, f"msg {i}",
+            datetime(2026, 5, 30, 10, i, 0, tzinfo=timezone.utc),
+        )
+    any_store.insert_new(
+        "+1999", None, "other sender",
+        datetime(2026, 5, 30, 10, 5, 0, tzinfo=timezone.utc),
+    )
+    recent = any_store.recent_by_sender("+1404", limit=3)
+    assert len(recent) == 3
+    assert all(r.from_number == "+1404" for r in recent)
+    # most-recent-first
+    assert recent[0].received_at >= recent[1].received_at >= recent[2].received_at
+
+
+def test_feedback_roundtrip(any_store):
+    row, _ = any_store.insert_new("+1404", None, "needs correction", _RECEIVED)
+    assert any_store.insert_feedback(row.msg_id, "billing", "P1", "wrong lane") is True
+    assert any_store.insert_feedback("nonexistent", "billing", None, None) is False
+    items = any_store.list_feedback(limit=10)
+    assert len(items) == 1
+    assert items[0]["msg_id"] == row.msg_id
+    assert items[0]["corrected_topic"] == "billing"
+    assert items[0]["corrected_urgency"] == "P1"
+
+
+def test_llm_spend_accumulates(any_store):
+    assert any_store.llm_spend_today() == pytest.approx(0.0)
+    assert any_store.add_llm_spend(0.10) == pytest.approx(0.10)
+    assert any_store.add_llm_spend(0.05) == pytest.approx(0.15)
+    assert any_store.llm_spend_today() == pytest.approx(0.15)
 
 
 def test_counts_by_status(any_store):

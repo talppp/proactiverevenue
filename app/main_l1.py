@@ -31,6 +31,7 @@ from app import config
 from app.admin import router as admin_router
 from app.ingestion.sms_phone import router as sms_phone_router
 from app.jobs.sms_poll import drain_stuck
+from app.l2_lite import LitePipeline, make_default_llm_fn
 from app.logging_setup import get_logger
 from app.sms_inbox_store import make_sms_inbox_store
 
@@ -81,7 +82,13 @@ async def _sms_poll_loop(app: FastAPI, interval: float) -> None:
 async def lifespan(app: FastAPI):
     db_url = os.environ.get("DB_URL", "memory")
     app.state.sms_inbox_store = make_sms_inbox_store(db_url)
-    app.state.pipeline = LoggingPipeline()
+    # L2-lite: rule-based classify + route + contact memory, with the
+    # LLM fallback active only when ANTHROPIC_API_KEY is set AND the
+    # daily budget has headroom. Replaces the LoggingPipeline stub.
+    app.state.pipeline = LitePipeline(
+        store=app.state.sms_inbox_store,
+        llm_fn=make_default_llm_fn(),
+    )
     app.state.poll_task = asyncio.create_task(
         _sms_poll_loop(app, interval=float(config.SMS_POLL_INTERVAL_SECONDS))
     )
@@ -89,6 +96,8 @@ async def lifespan(app: FastAPI):
         "main_l1_startup",
         db_url=("postgres" if db_url != "memory" else "memory"),
         poll_interval=config.SMS_POLL_INTERVAL_SECONDS,
+        pipeline="l2_lite",
+        llm_enabled=config.LLM_ENABLED,
     )
     yield
     app.state.poll_task.cancel()

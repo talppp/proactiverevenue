@@ -99,3 +99,41 @@ async def health(
 ) -> dict[str, int]:
     store: SmsInboxStore = _get_store(request)
     return store.counts_by_status()
+
+
+class FeedbackPayload(BaseModel):
+    corrected_topic: str | None = Field(default=None, max_length=64)
+    corrected_urgency: str | None = Field(default=None, max_length=8)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+@router.post("/sms_inbox_raw/{msg_id}/feedback")
+async def feedback(
+    msg_id: str,
+    payload: FeedbackPayload,
+    request: Request,
+    _: None = Depends(_verify_admin),
+) -> dict[str, object]:
+    """Record an operator correction (wrong topic/urgency/owner) against a
+    message. These accumulate as labeled eval data for classifier tuning —
+    the system's learning loop starts here."""
+    if not any([payload.corrected_topic, payload.corrected_urgency, payload.note]):
+        raise HTTPException(status_code=422, detail="empty feedback")
+    store: SmsInboxStore = _get_store(request)
+    if not store.insert_feedback(
+        msg_id, payload.corrected_topic, payload.corrected_urgency, payload.note
+    ):
+        raise HTTPException(status_code=404, detail="no message with that msg_id")
+    log.info("sms_feedback_recorded", msg_id=msg_id)
+    return {"status": "recorded", "msg_id": msg_id}
+
+
+@router.get("/feedback")
+async def list_feedback(
+    request: Request,
+    limit: int = 50,
+    _: None = Depends(_verify_admin),
+) -> list[dict]:
+    """Most-recent-first corrections — the eval-set export."""
+    store: SmsInboxStore = _get_store(request)
+    return store.list_feedback(limit=min(limit, 500))

@@ -87,6 +87,32 @@ class SmsInboxStore(Protocol):
 
     def counts_by_status(self) -> dict[Status, int]: ...
 
+    def recent_by_sender(self, from_number: str, limit: int) -> list[SmsRow]:
+        """Most-recent-first message history for one sender — the
+        contact-memory lookup the classifier uses for thread context."""
+        ...
+
+    def insert_feedback(
+        self,
+        msg_id: str,
+        corrected_topic: str | None,
+        corrected_urgency: str | None,
+        note: str | None,
+    ) -> bool:
+        """Record an operator correction against a staged message.
+        Returns False when msg_id doesn't exist (no orphan feedback)."""
+        ...
+
+    def list_feedback(self, limit: int) -> list[dict]:
+        """Most-recent-first corrections, for eval-set export."""
+        ...
+
+    def add_llm_spend(self, usd: float) -> float:
+        """Accumulate LLM spend for today (UTC). Returns the new day total."""
+        ...
+
+    def llm_spend_today(self) -> float: ...
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -99,6 +125,8 @@ class InMemorySmsInboxStore:
     _rows: dict[str, SmsRow] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _now: Callable[[], datetime] = field(default=_utcnow)
+    _feedback: list[dict] = field(default_factory=list)
+    _spend: dict[str, float] = field(default_factory=dict)  # 'YYYY-MM-DD' -> usd
 
     def insert_new(
         self,
@@ -177,6 +205,48 @@ class InMemorySmsInboxStore:
             for row in self._rows.values():
                 counts[row.status] = counts.get(row.status, 0) + 1
         return counts
+
+    def recent_by_sender(self, from_number: str, limit: int) -> list[SmsRow]:
+        with self._lock:
+            hits = [r for r in self._rows.values() if r.from_number == from_number]
+            hits.sort(key=lambda r: r.received_at, reverse=True)
+            return hits[:limit]
+
+    def insert_feedback(
+        self,
+        msg_id: str,
+        corrected_topic: str | None,
+        corrected_urgency: str | None,
+        note: str | None,
+    ) -> bool:
+        with self._lock:
+            if msg_id not in self._rows:
+                return False
+            self._feedback.append(
+                {
+                    "msg_id": msg_id,
+                    "corrected_topic": corrected_topic,
+                    "corrected_urgency": corrected_urgency,
+                    "note": note,
+                    "created_at": self._now(),
+                }
+            )
+            return True
+
+    def list_feedback(self, limit: int) -> list[dict]:
+        with self._lock:
+            return list(reversed(self._feedback))[:limit]
+
+    def add_llm_spend(self, usd: float) -> float:
+        day = self._now().date().isoformat()
+        with self._lock:
+            self._spend[day] = self._spend.get(day, 0.0) + usd
+            return self._spend[day]
+
+    def llm_spend_today(self) -> float:
+        day = self._now().date().isoformat()
+        with self._lock:
+            return self._spend.get(day, 0.0)
 
 
 # ----------------------------------------------------------------------
@@ -339,6 +409,108 @@ class PostgresSmsInboxStore:
         for status, n in rows:
             counts[status] = int(n)
         return counts
+
+    def recent_by_sender(self, from_number: str, limit: int) -> list[SmsRow]:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT msg_id, from_number, to_number, body,
+                           received_at_phone, received_at, status, attempts,
+                           last_error, handed_off_at
+                      FROM sms_inbox_raw
+                     WHERE from_number = :f
+                  ORDER BY received_at DESC
+                     LIMIT :n
+                    """
+                ),
+                {"f": from_number, "n": limit},
+            ).fetchall()
+        return [self._row_from_db(r) for r in rows]
+
+    def insert_feedback(
+        self,
+        msg_id: str,
+        corrected_topic: str | None,
+        corrected_urgency: str | None,
+        note: str | None,
+    ) -> bool:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            exists = conn.execute(
+                text("SELECT 1 FROM sms_inbox_raw WHERE msg_id=:id"),
+                {"id": msg_id},
+            ).fetchone()
+            if not exists:
+                return False
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO sms_feedback
+                      (msg_id, corrected_topic, corrected_urgency, note)
+                    VALUES (:id, :topic, :urg, :note)
+                    """
+                ),
+                {"id": msg_id, "topic": corrected_topic,
+                 "urg": corrected_urgency, "note": note},
+            )
+            return True
+
+    def list_feedback(self, limit: int) -> list[dict]:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT msg_id, corrected_topic, corrected_urgency, note,
+                           created_at
+                      FROM sms_feedback
+                  ORDER BY created_at DESC
+                     LIMIT :n
+                    """
+                ),
+                {"n": limit},
+            ).fetchall()
+        return [
+            {
+                "msg_id": r[0],
+                "corrected_topic": r[1],
+                "corrected_urgency": r[2],
+                "note": r[3],
+                "created_at": r[4],
+            }
+            for r in rows
+        ]
+
+    def add_llm_spend(self, usd: float) -> float:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            total = conn.execute(
+                text(
+                    """
+                    INSERT INTO llm_spend (day, usd)
+                    VALUES (CURRENT_DATE, :usd)
+                    ON CONFLICT (day) DO UPDATE SET usd = llm_spend.usd + :usd
+                    RETURNING usd
+                    """
+                ),
+                {"usd": usd},
+            ).scalar_one()
+        return float(total)
+
+    def llm_spend_today(self) -> float:
+        from sqlalchemy import text
+
+        with self.engine.begin() as conn:
+            total = conn.execute(
+                text("SELECT usd FROM llm_spend WHERE day = CURRENT_DATE")
+            ).scalar_one_or_none()
+        return float(total) if total is not None else 0.0
 
     # ------------------------------------------------------------------
     def _fetch(self, conn, msg_id: str) -> SmsRow | None:

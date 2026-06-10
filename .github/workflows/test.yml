@@ -69,8 +69,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt psycopg2-binary
 
-      - name: Apply migration
-        run: psql "postgresql://test:test@localhost:5432/test" -f migrations/001_sms_inbox_raw.sql
+      - name: Apply migrations
+        run: |
+          psql "postgresql://test:test@localhost:5432/test" -f migrations/001_sms_inbox_raw.sql
+          psql "postgresql://test:test@localhost:5432/test" -f migrations/002_feedback_and_spend.sql
 
       - name: Postgres contract tests
         run: pytest tests/test_sms_inbox_store_contract.py -v --tb=short
