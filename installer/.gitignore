@@ -1,0 +1,5 @@
+# Safety net: the export bundle can contain API keys / tokens.
+lenovo-export*
+lenovo-export.zip
+lenovo-export/
+*.zip
